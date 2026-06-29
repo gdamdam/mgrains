@@ -315,6 +315,186 @@ button.file-button:disabled {
   padding-top: 16px;
 }
 
+.shatter-workspace {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.shatter-clock,
+.shatter-sequencer {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgb(20 24 20 / 84%);
+}
+
+.shatter-clock {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.shatter-clock .parameter-control {
+  grid-template-columns: 1fr;
+}
+
+.shatter-clock .parameter-value {
+  justify-self: start;
+}
+
+.division-control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid #272d27;
+  border-radius: 10px;
+  background: #101310;
+}
+
+.division-control strong {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.division-control select {
+  grid-column: 1 / -1;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--panel-raised);
+}
+
+.step-lane {
+  display: grid;
+  grid-template-columns: repeat(16, minmax(38px, 1fr));
+  gap: 5px;
+}
+
+.step-button {
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 7px 3px;
+  border: 1px solid #2d332d;
+  border-radius: 7px;
+  color: #687066;
+  background: #0e110e;
+  cursor: pointer;
+}
+
+.step-button span {
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.step-button small {
+  min-height: 1em;
+  font-size: 0.6rem;
+}
+
+.step-button.is-enabled {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, #0e110e);
+}
+
+.step-button.is-selected {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.step-button.is-current::after {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 9px var(--accent-soft);
+  content: "";
+}
+
+.step-editor {
+  display: grid;
+  grid-template-columns: 1.15fr 1.15fr 0.75fr 0.7fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.step-editor > label,
+.step-editor-title {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 10px 12px;
+  border: 1px solid #272d27;
+  border-radius: 9px;
+  background: #101310;
+  font-size: 0.75rem;
+}
+
+.step-editor-title {
+  grid-column: 1 / -1;
+  min-height: 48px;
+}
+
+.step-editor-title button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.step-editor-title button.is-active {
+  color: #10130e;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.step-editor strong {
+  color: var(--accent);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.step-editor input[type="range"] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.step-editor .select-control {
+  grid-template-columns: 1fr;
+}
+
+.select-control select {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel-raised);
+}
+
+.step-editor .reverse-control {
+  grid-template-columns: auto 1fr;
+}
+
+.reverse-control input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
 .live-strip {
   display: flex;
   align-items: center;
@@ -486,6 +666,18 @@ footer {
   .performance-grid {
     grid-template-columns: 1fr;
   }
+
+  .shatter-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .shatter-clock {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .step-lane {
+    grid-template-columns: repeat(8, 1fr);
+  }
 }
 
 @media (max-width: 560px) {
@@ -495,6 +687,19 @@ footer {
 
   .parameter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .shatter-clock,
+  .step-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .step-editor-title {
+    grid-column: auto;
+  }
+
+  .step-lane {
+    grid-template-columns: repeat(4, 1fr);
   }
 
   .mode-switch {

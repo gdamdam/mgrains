@@ -4,6 +4,7 @@ import {
   type GrainPatch,
 } from '../contracts'
 import { XorShift32 } from './rng'
+import { shatterStepFrames } from './shatterTiming'
 import { grainWindow } from './windows'
 
 export interface GranularCoreOptions {
@@ -14,6 +15,8 @@ export interface GranularCoreOptions {
 export interface ProcessResult {
   activeGrains: number
   peak: number
+  spawnedGrains: number
+  currentStep: number
 }
 
 const DEFAULT_MAX_GRAINS = 64
@@ -30,6 +33,9 @@ export class GranularCore {
   private sourceFrameOffset = 0
   private frame = 0
   private nextGrainFrame = 0
+  private shatterStepIndex = 0
+  private shatterRatchetIndex = 0
+  private lastShatterStep = 0
 
   private readonly active: Uint8Array
   private readonly sourcePosition: Float64Array
@@ -71,9 +77,17 @@ export class GranularCore {
   }
 
   setPatch(nextPatch: GrainPatch): void {
+    const previousPatch = this.patch
     const previousSeed = this.patch.seed
     this.patch = sanitizePatch(nextPatch)
     if (this.patch.seed !== previousSeed) this.rng.reset(this.patch.seed)
+    if (
+      this.patch.mode !== previousPatch.mode
+      || this.patch.bpm !== previousPatch.bpm
+      || this.patch.shatterDivision !== previousPatch.shatterDivision
+    ) {
+      this.resyncScheduler()
+    }
   }
 
   setSource(left: Float32Array, right: Float32Array): void {
@@ -118,6 +132,9 @@ export class GranularCore {
     this.age.fill(0)
     this.frame = 0
     this.nextGrainFrame = 0
+    this.shatterStepIndex = 0
+    this.shatterRatchetIndex = 0
+    this.lastShatterStep = 0
     this.rng.reset(seed)
   }
 
@@ -131,19 +148,25 @@ export class GranularCore {
 
     if (this.sourceLength < 2) {
       this.frame += outputLeft.length
-      return { activeGrains: 0, peak: 0 }
+      return { activeGrains: 0, peak: 0, spawnedGrains: 0, currentStep: this.lastShatterStep }
     }
 
-    const intervalFrames = this.sampleRate / this.patch.densityHz
     let peak = 0
+    let spawnedGrains = 0
 
     for (let offset = 0; offset < outputLeft.length; offset += 1) {
       const absoluteFrame = this.frame + offset
 
       if (absoluteFrame >= this.nextGrainFrame) {
-        this.spawnGrain()
-        const jitter = 1 + this.rng.nextBipolar() * this.patch.timingJitter * 0.45
-        this.nextGrainFrame += Math.max(1, intervalFrames * jitter)
+        if (this.patch.mode === 'shatter') {
+          spawnedGrains += this.scheduleShatterEvent()
+        } else {
+          this.spawnGrain()
+          spawnedGrains += 1
+          const intervalFrames = this.sampleRate / this.patch.densityHz
+          const jitter = 1 + this.rng.nextBipolar() * this.patch.timingJitter * 0.45
+          this.nextGrainFrame += Math.max(1, intervalFrames * jitter)
+        }
       }
 
       let left = 0
@@ -186,10 +209,36 @@ export class GranularCore {
     }
 
     this.frame += outputLeft.length
-    return { activeGrains: this.activeGrainCount, peak }
+    return {
+      activeGrains: this.activeGrainCount,
+      peak,
+      spawnedGrains,
+      currentStep: this.lastShatterStep,
+    }
   }
 
-  private spawnGrain(): void {
+  private scheduleShatterEvent(): number {
+    const step = this.patch.shatterSteps[this.shatterStepIndex]
+    this.lastShatterStep = this.shatterStepIndex
+    const shouldSpawn = step.enabled && this.rng.nextFloat() <= step.probability
+    if (shouldSpawn) this.spawnGrain(step.pitchOffsetSemitones, step.reverse)
+
+    const stepFrames = shatterStepFrames(
+      this.sampleRate,
+      this.patch.bpm,
+      this.patch.shatterDivision,
+    )
+    this.nextGrainFrame += Math.max(1, stepFrames / step.ratchet)
+    this.shatterRatchetIndex += 1
+    if (this.shatterRatchetIndex >= step.ratchet) {
+      this.shatterRatchetIndex = 0
+      this.shatterStepIndex = (this.shatterStepIndex + 1) % this.patch.shatterSteps.length
+    }
+
+    return shouldSpawn ? 1 : 0
+  }
+
+  private spawnGrain(pitchOffsetSemitones = 0, forceReverse = false): void {
     const slot = this.findGrainSlot()
     const regionStart = Math.floor(this.patch.regionStart * (this.sourceLength - 1))
     const regionEnd = Math.max(regionStart + 2, Math.ceil(this.patch.regionEnd * this.sourceLength))
@@ -199,9 +248,9 @@ export class GranularCore {
     const normalizedPosition = movingPosition - Math.floor(movingPosition)
     const spray = this.rng.nextBipolar() * this.patch.spray * 0.5
     const positionInRegion = this.wrapUnit(normalizedPosition + spray)
-    const pitch = this.patch.pitchSemitones
+    const pitch = this.patch.pitchSemitones + pitchOffsetSemitones
       + this.rng.nextBipolar() * this.patch.pitchSpreadSemitones
-    const direction = this.rng.nextFloat() < this.patch.reverseProbability ? -1 : 1
+    const direction = forceReverse || this.rng.nextFloat() < this.patch.reverseProbability ? -1 : 1
     const pan = this.rng.nextBipolar() * this.patch.stereoSpread
     const durationFrames = Math.max(2, this.patch.grainSizeMs * 0.001 * this.sampleRate)
     const expectedOverlap = Math.max(1, this.patch.densityHz * durationFrames / this.sampleRate)
@@ -231,6 +280,13 @@ export class GranularCore {
     }
 
     return oldestSlot
+  }
+
+  private resyncScheduler(): void {
+    this.nextGrainFrame = this.frame
+    this.shatterStepIndex = 0
+    this.shatterRatchetIndex = 0
+    this.lastShatterStep = 0
   }
 
   private readLinear(

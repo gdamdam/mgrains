@@ -4,6 +4,29 @@ export type AudioSourceMode = 'sample' | 'live'
 
 export type GrainWindow = 'hann' | 'percussive' | 'hard' | 'reverse'
 
+export const SHATTER_DIVISIONS = [
+  '1/4',
+  '1/8D',
+  '1/8',
+  '1/8T',
+  '1/16D',
+  '1/16',
+  '1/16T',
+  '1/32',
+  '1/32T',
+  '1/64',
+] as const
+
+export type ShatterDivision = typeof SHATTER_DIVISIONS[number]
+
+export interface ShatterStep {
+  enabled: boolean
+  probability: number
+  pitchOffsetSemitones: number
+  reverse: boolean
+  ratchet: 1 | 2 | 3 | 4
+}
+
 export interface GrainPatch {
   schemaVersion: 1
   mode: GrainMode
@@ -22,7 +45,20 @@ export interface GrainPatch {
   window: GrainWindow
   outputGain: number
   seed: number
+  bpm: number
+  shatterDivision: ShatterDivision
+  shatterSteps: ShatterStep[]
 }
+
+export const DEFAULT_SHATTER_STEPS: ReadonlyArray<Readonly<ShatterStep>> = Object.freeze(
+  Array.from({ length: 16 }, (_, index): Readonly<ShatterStep> => Object.freeze({
+    enabled: ![2, 5, 7, 10, 12, 15].includes(index),
+    probability: index === 14 ? 0.65 : 1,
+    pitchOffsetSemitones: index === 6 ? 12 : index === 11 ? -12 : 0,
+    reverse: index === 3 || index === 13,
+    ratchet: index === 9 ? 2 : 1,
+  })),
+)
 
 export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   schemaVersion: 1,
@@ -42,6 +78,9 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   window: 'hann',
   outputGain: 0.72,
   seed: 0x6d677261,
+  bpm: 120,
+  shatterDivision: '1/16',
+  shatterSteps: DEFAULT_SHATTER_STEPS.map((step) => ({ ...step })),
 })
 
 export const PATCH_RANGES = Object.freeze({
@@ -56,6 +95,7 @@ export const PATCH_RANGES = Object.freeze({
   reverseProbability: [0, 1] as const,
   stereoSpread: [0, 1] as const,
   outputGain: [0, 1] as const,
+  bpm: [30, 300] as const,
 })
 
 export interface EngineTelemetry {
@@ -66,6 +106,7 @@ export interface EngineTelemetry {
   sourceMode: AudioSourceMode
   liveBufferSeconds: number
   frozen: boolean
+  shatterStep: number
 }
 
 export type EngineToMainMessage = EngineTelemetry
@@ -111,5 +152,28 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
       : 'hann',
     outputGain: clamp(candidate.outputGain, ...PATCH_RANGES.outputGain),
     seed: Number.isFinite(candidate.seed) ? candidate.seed >>> 0 : DEFAULT_PATCH.seed,
+    bpm: clamp(candidate.bpm, ...PATCH_RANGES.bpm),
+    shatterDivision: SHATTER_DIVISIONS.includes(candidate.shatterDivision)
+      ? candidate.shatterDivision
+      : DEFAULT_PATCH.shatterDivision,
+    shatterSteps: sanitizeShatterSteps(candidate.shatterSteps),
   }
+}
+
+function sanitizeShatterSteps(candidate: ShatterStep[]): ShatterStep[] {
+  const steps = Array.isArray(candidate) ? candidate : DEFAULT_SHATTER_STEPS
+  return Array.from({ length: 16 }, (_, index) => {
+    const fallback = DEFAULT_SHATTER_STEPS[index]
+    const step = steps[index] ?? fallback
+    const ratchet = Number.isFinite(step.ratchet)
+      ? Math.round(clamp(step.ratchet, 1, 4)) as ShatterStep['ratchet']
+      : fallback.ratchet
+    return {
+      enabled: step.enabled === true,
+      probability: clamp(step.probability, 0, 1),
+      pitchOffsetSemitones: Math.round(clamp(step.pitchOffsetSemitones, -24, 24)),
+      reverse: step.reverse === true,
+      ratchet,
+    }
+  })
 }

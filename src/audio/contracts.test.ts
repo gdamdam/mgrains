@@ -20,4 +20,28 @@ describe('sanitizePatch', () => {
     expect(patch.reverseProbability).toBe(0)
     expect(patch.outputGain).toBe(1)
   })
+
+  it('normalizes Shatter steps to a safe deterministic lane', () => {
+    const patch = sanitizePatch({
+      ...DEFAULT_PATCH,
+      bpm: 999,
+      shatterSteps: [{
+        enabled: true,
+        probability: 4,
+        pitchOffsetSemitones: -99,
+        reverse: true,
+        ratchet: 9 as 1,
+      }],
+    })
+
+    expect(patch.bpm).toBe(300)
+    expect(patch.shatterSteps).toHaveLength(16)
+    expect(patch.shatterSteps[0]).toEqual({
+      enabled: true,
+      probability: 1,
+      pitchOffsetSemitones: -24,
+      reverse: true,
+      ratchet: 4,
+    })
+  })
 })

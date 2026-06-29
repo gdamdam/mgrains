@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PATCH } from '../contracts'
+import { DEFAULT_PATCH, type ShatterStep } from '../contracts'
 import { GranularCore } from './GranularCore'
 
 function makeSource(length = 2048): Float32Array {
@@ -14,6 +14,27 @@ function render(core: GranularCore, blocks = 40): Float32Array {
     core.process(left, right)
   }
   return rendered
+}
+
+function countSpawned(core: GranularCore, frames: number, blockSize = 64): number {
+  let spawned = 0
+  for (let offset = 0; offset < frames; offset += blockSize) {
+    const length = Math.min(blockSize, frames - offset)
+    const result = core.process(new Float32Array(length), new Float32Array(length))
+    spawned += result.spawnedGrains
+  }
+  return spawned
+}
+
+function shatterSteps(overrides: Partial<ShatterStep> = {}): ShatterStep[] {
+  return Array.from({ length: 16 }, () => ({
+    enabled: true,
+    probability: 1,
+    pitchOffsetSemitones: 0,
+    reverse: false,
+    ratchet: 1,
+    ...overrides,
+  }))
 }
 
 describe('GranularCore', () => {
@@ -102,6 +123,41 @@ describe('GranularCore', () => {
     expect(right[1]).toBeCloseTo(0.03)
   })
 
+  it('schedules Shatter steps at sample-frame divisions', () => {
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 8 })
+    core.setPatch({
+      ...DEFAULT_PATCH,
+      mode: 'shatter',
+      bpm: 60,
+      shatterDivision: '1/16',
+      shatterSteps: shatterSteps(),
+      grainSizeMs: 5,
+    })
+    const source = makeSource()
+    core.setSource(source, source)
+
+    expect(countSpawned(core, 1_000)).toBe(4)
+  })
+
+  it('honors Shatter gates, probability, and ratchets deterministically', () => {
+    const steps = shatterSteps({ enabled: false })
+    steps[0] = { ...steps[0], enabled: true, ratchet: 2 }
+    steps[1] = { ...steps[1], enabled: true, probability: 0 }
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 8 })
+    core.setPatch({
+      ...DEFAULT_PATCH,
+      mode: 'shatter',
+      bpm: 60,
+      shatterDivision: '1/16',
+      shatterSteps: steps,
+      grainSizeMs: 5,
+    })
+    const source = makeSource()
+    core.setSource(source, source)
+
+    expect(countSpawned(core, 500)).toBe(2)
+  })
+
   it('produces silence without a source', () => {
     const core = new GranularCore({ sampleRate: 48_000 })
     const left = new Float32Array(128).fill(1)
@@ -110,6 +166,11 @@ describe('GranularCore', () => {
 
     expect(left.every((sample) => sample === 0)).toBe(true)
     expect(right.every((sample) => sample === 0)).toBe(true)
-    expect(result).toEqual({ activeGrains: 0, peak: 0 })
+    expect(result).toEqual({
+      activeGrains: 0,
+      peak: 0,
+      spawnedGrains: 0,
+      currentStep: 0,
+    })
   })
 })

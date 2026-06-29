@@ -17,13 +17,14 @@ Implemented:
 - preserved imported sample state when switching between Sample and Live;
 - generated stereo demo source and waveform peaks;
 - browser file decoding with size/duration limits;
-- Bloom/Shatter presentation and mode starting values;
+- distinct Bloom free-running and Shatter sample-frame schedulers;
+- Shatter BPM plus straight/dotted/triplet divisions and a 16-step gate/probability/pitch/reverse/ratchet editor;
 - interactive waveform position, XY surface, and direct Grain Size, Density, Position, and Spray controls;
 - responsive, keyboard-readable, reduced-motion-aware foundation UI;
 - production-only service-worker registration and an offline-shell web manifest;
 - clean timeout/error behavior when browser audio output cannot start.
 
-This is deliberately not presented as the complete v1. Physical-device live-input QA, the true tempo-synced Shatter scheduler, macros, advanced controls, motion recording, step lane, persistence, recording, MIDI, and full offline/update QA remain to be built.
+This is deliberately not presented as the complete v1. Physical-device audio QA, macros, advanced controls, mutation/history, motion recording, persistence, recording, MIDI, and full offline/update QA remain to be built.
 
 See [`docs/HANDOFF.md`](./docs/HANDOFF.md) for verified status and continuation order, and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the real-time boundary.
 

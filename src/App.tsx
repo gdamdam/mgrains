@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AudioEngine, type AudioEngineState } from './audio/AudioEngine'
 import {
   DEFAULT_PATCH,
+  SHATTER_DIVISIONS,
   sanitizePatch,
   type AudioSourceMode,
   type GrainMode,
@@ -9,6 +10,7 @@ import {
 } from './audio/contracts'
 import { createDemoSource } from './audio/demoSource'
 import { ParameterControl } from './components/ParameterControl'
+import { ShatterSequencer } from './components/ShatterSequencer'
 import { Waveform } from './components/Waveform'
 import { XYPad } from './components/XYPad'
 import './styles.css'
@@ -46,6 +48,7 @@ export default function App() {
   const [liveBufferSeconds, setLiveBufferSeconds] = useState(0)
   const [activeGrains, setActiveGrains] = useState(0)
   const [peak, setPeak] = useState(0)
+  const [currentShatterStep, setCurrentShatterStep] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => () => {
@@ -72,6 +75,7 @@ export default function App() {
         setSourceMode(telemetry.sourceMode)
         setFrozen(telemetry.frozen)
         setLiveBufferSeconds(telemetry.liveBufferSeconds)
+        setCurrentShatterStep(telemetry.shatterStep)
       })
       await engine.start()
       const source = createDemoSource(engine.sampleRate ?? 48_000)
@@ -262,6 +266,42 @@ export default function App() {
         </div>
       )}
 
+      {patch.mode === 'shatter' && (
+        <section className="shatter-workspace">
+          <div className="shatter-clock">
+            <ParameterControl
+              label="Tempo"
+              value={patch.bpm}
+              minimum={30}
+              maximum={300}
+              step={1}
+              unit="BPM"
+              decimals={0}
+              onChange={(bpm) => updatePatch({ bpm })}
+            />
+            <label className="division-control">
+              <span>Trigger division</span>
+              <strong>{patch.shatterDivision}</strong>
+              <select
+                value={patch.shatterDivision}
+                onChange={(event) => updatePatch({
+                  shatterDivision: event.currentTarget.value as GrainPatch['shatterDivision'],
+                })}
+              >
+                {SHATTER_DIVISIONS.map((division) => (
+                  <option value={division} key={division}>{division}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <ShatterSequencer
+            steps={patch.shatterSteps}
+            currentStep={currentShatterStep}
+            onChange={(shatterSteps) => updatePatch({ shatterSteps })}
+          />
+        </section>
+      )}
+
       <section className="performance-grid">
         <XYPad
           mode={patch.mode}
@@ -286,15 +326,26 @@ export default function App() {
               decimals={0}
               onChange={(grainSizeMs) => updatePatch({ grainSizeMs })}
             />
-            <ParameterControl
-              label="Density"
-              value={patch.densityHz}
-              minimum={0.25}
-              maximum={80}
-              unit="grains/s"
-              scale="log"
-              onChange={(densityHz) => updatePatch({ densityHz })}
-            />
+            {patch.mode === 'bloom' ? (
+              <ParameterControl
+                label="Density"
+                value={patch.densityHz}
+                minimum={0.25}
+                maximum={80}
+                unit="grains/s"
+                scale="log"
+                onChange={(densityHz) => updatePatch({ densityHz })}
+              />
+            ) : (
+              <ParameterControl
+                label="Pitch spread"
+                value={patch.pitchSpreadSemitones}
+                minimum={0}
+                maximum={24}
+                unit="st"
+                onChange={(pitchSpreadSemitones) => updatePatch({ pitchSpreadSemitones })}
+              />
+            )}
             <ParameterControl
               label="Position"
               value={patch.position * 100}

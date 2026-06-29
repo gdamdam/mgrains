@@ -102,6 +102,7 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
         sourceMode: this.sourceMode,
         liveBufferSeconds: this.liveBuffer.validLength / sampleRate,
         frozen: this.liveBuffer.frozen,
+        shatterStep: result.currentStep,
       }
       this.port.postMessage(message)
       this.framesUntilTelemetry = Math.max(1, Math.round(sampleRate / 30))
