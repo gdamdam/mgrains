@@ -74,6 +74,34 @@ describe('GranularCore', () => {
     expect(core.activeGrainCount).toBeLessThanOrEqual(4)
   })
 
+  it('reads a circular source view from its chronological offset', () => {
+    const physical = Float32Array.from([0.05, 0.02, 0.03, 0.04])
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 1 })
+    core.setPatch({
+      ...DEFAULT_PATCH,
+      grainSizeMs: 5,
+      densityHz: 80,
+      position: 0,
+      regionStart: 0,
+      regionEnd: 1,
+      spray: 0,
+      timingJitter: 0,
+      pitchSpreadSemitones: 0,
+      reverseProbability: 0,
+      stereoSpread: 0,
+      window: 'hard',
+      outputGain: 1,
+    })
+    core.setSourceView(physical, physical, 4, 1)
+
+    const left = new Float32Array(4)
+    const right = new Float32Array(4)
+    core.process(left, right)
+
+    expect(left[1]).toBeCloseTo(0.03)
+    expect(right[1]).toBeCloseTo(0.03)
+  })
+
   it('produces silence without a source', () => {
     const core = new GranularCore({ sampleRate: 48_000 })
     const left = new Float32Array(128).fill(1)

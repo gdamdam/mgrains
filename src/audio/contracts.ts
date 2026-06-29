@@ -1,5 +1,7 @@
 export type GrainMode = 'bloom' | 'shatter'
 
+export type AudioSourceMode = 'sample' | 'live'
+
 export type GrainWindow = 'hann' | 'percussive' | 'hard' | 'reverse'
 
 export interface GrainPatch {
@@ -61,6 +63,9 @@ export interface EngineTelemetry {
   frame: number
   activeGrains: number
   peak: number
+  sourceMode: AudioSourceMode
+  liveBufferSeconds: number
+  frozen: boolean
 }
 
 export type EngineToMainMessage = EngineTelemetry
@@ -68,6 +73,9 @@ export type EngineToMainMessage = EngineTelemetry
 export type MainToEngineMessage =
   | { type: 'set-patch'; patch: GrainPatch }
   | { type: 'set-source'; channels: [Float32Array, Float32Array] }
+  | { type: 'set-source-mode'; mode: AudioSourceMode }
+  | { type: 'set-freeze'; frozen: boolean }
+  | { type: 'clear-live-buffer' }
   | { type: 'clear-source' }
   | { type: 'reset'; seed?: number }
 

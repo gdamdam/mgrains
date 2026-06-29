@@ -14,6 +14,8 @@ export class AudioEngine {
   private node: AudioWorkletNode | null = null
   private master: GainNode | null = null
   private limiter: DynamicsCompressorNode | null = null
+  private liveStream: MediaStream | null = null
+  private liveInputNode: MediaStreamAudioSourceNode | null = null
   private stateListener: ((state: AudioEngineState) => void) | null = null
   private telemetryListener: ((telemetry: EngineTelemetry) => void) | null = null
 
@@ -61,7 +63,7 @@ export class AudioEngine {
         'The granular audio processor did not finish loading. Reload the page and try again.',
       )
       const node = new AudioWorkletNode(context, 'mgrains-granular', {
-        numberOfInputs: 0,
+        numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [2],
         channelCount: 2,
@@ -99,10 +101,65 @@ export class AudioEngine {
   }
 
   setSource(source: AudioSourceData): void {
+    this.stopLiveInput()
     const left = source.left.slice()
     const right = source.right.slice()
     const message: MainToEngineMessage = { type: 'set-source', channels: [left, right] }
     this.node?.port.postMessage(message, [left.buffer, right.buffer])
+    this.send({ type: 'set-source-mode', mode: 'sample' })
+    this.send({ type: 'set-freeze', frozen: false })
+  }
+
+  async enableLiveInput(): Promise<MediaTrackSettings> {
+    if (!this.context || !this.node) {
+      throw new Error('Start the audio engine before enabling live input.')
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('This browser does not provide microphone or line-input access.')
+    }
+
+    this.stopLiveInput()
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: { ideal: 2 },
+      },
+    })
+    const track = stream.getAudioTracks()[0]
+    if (!track) {
+      stream.getTracks().forEach((streamTrack) => streamTrack.stop())
+      throw new Error('The selected input did not provide an audio track.')
+    }
+    if ('contentHint' in track) track.contentHint = 'music'
+
+    const inputNode = this.context.createMediaStreamSource(stream)
+    inputNode.connect(this.node)
+    track.addEventListener('ended', () => {
+      if (this.liveStream === stream) this.stopLiveInput()
+    }, { once: true })
+
+    this.liveStream = stream
+    this.liveInputNode = inputNode
+    this.send({ type: 'clear-live-buffer' })
+    this.send({ type: 'set-source-mode', mode: 'live' })
+    this.send({ type: 'set-freeze', frozen: false })
+    return track.getSettings()
+  }
+
+  setFrozen(frozen: boolean): void {
+    this.send({ type: 'set-freeze', frozen })
+  }
+
+  useSampleSource(): void {
+    this.stopLiveInput()
+    this.send({ type: 'set-source-mode', mode: 'sample' })
+    this.send({ type: 'set-freeze', frozen: false })
+  }
+
+  clearLiveBuffer(): void {
+    this.send({ type: 'clear-live-buffer' })
   }
 
   async decodeFile(file: File): Promise<AudioSourceData> {
@@ -132,6 +189,7 @@ export class AudioEngine {
   }
 
   async close(): Promise<void> {
+    this.stopLiveInput()
     this.node?.disconnect()
     this.master?.disconnect()
     this.limiter?.disconnect()
@@ -145,6 +203,13 @@ export class AudioEngine {
 
   private send(message: MainToEngineMessage): void {
     this.node?.port.postMessage(message)
+  }
+
+  private stopLiveInput(): void {
+    this.liveInputNode?.disconnect()
+    this.liveStream?.getTracks().forEach((track) => track.stop())
+    this.liveInputNode = null
+    this.liveStream = null
   }
 
   private emitState(state: AudioEngineState): void {

@@ -8,6 +8,7 @@ interface WaveformProps {
   regionStart: number
   regionEnd: number
   activeGrains: number
+  emptyLabel?: string
   onPositionChange: (position: number) => void
 }
 
@@ -21,6 +22,7 @@ export function Waveform({
   regionStart,
   regionEnd,
   activeGrains,
+  emptyLabel = 'Choose a source to begin',
   onPositionChange,
 }: WaveformProps) {
   const path = useMemo(() => {
@@ -85,6 +87,11 @@ export function Waveform({
           height={HEIGHT}
         />
         {path && <path className="waveform-path" d={path} />}
+        {!path && (
+          <text className="waveform-empty" x={WIDTH / 2} y={HEIGHT / 2} textAnchor="middle">
+            {emptyLabel}
+          </text>
+        )}
         <line
           className="position-line"
           x1={(regionStart + position * (regionEnd - regionStart)) * WIDTH}

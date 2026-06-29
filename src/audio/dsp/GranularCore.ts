@@ -27,11 +27,13 @@ export class GranularCore {
   private sourceLeft: Float32Array<ArrayBufferLike> = new Float32Array(0)
   private sourceRight: Float32Array<ArrayBufferLike> = new Float32Array(0)
   private sourceLength = 0
+  private sourceFrameOffset = 0
   private frame = 0
   private nextGrainFrame = 0
 
   private readonly active: Uint8Array
   private readonly sourcePosition: Float64Array
+  private readonly grainSourceOffset: Float64Array
   private readonly step: Float64Array
   private readonly age: Float64Array
   private readonly duration: Float64Array
@@ -48,6 +50,7 @@ export class GranularCore {
     this.rng = new XorShift32(this.patch.seed)
     this.active = new Uint8Array(this.maxGrains)
     this.sourcePosition = new Float64Array(this.maxGrains)
+    this.grainSourceOffset = new Float64Array(this.maxGrains)
     this.step = new Float64Array(this.maxGrains)
     this.age = new Float64Array(this.maxGrains)
     this.duration = new Float64Array(this.maxGrains)
@@ -83,13 +86,30 @@ export class GranularCore {
     this.sourceLeft = left
     this.sourceRight = right
     this.sourceLength = length
+    this.sourceFrameOffset = 0
     this.reset()
+  }
+
+  setSourceView(
+    left: Float32Array<ArrayBufferLike>,
+    right: Float32Array<ArrayBufferLike>,
+    validLength: number,
+    frameOffset: number,
+  ): void {
+    const capacity = Math.min(left.length, right.length)
+    this.sourceLeft = left
+    this.sourceRight = right
+    this.sourceLength = Math.max(0, Math.min(capacity, Math.floor(validLength)))
+    this.sourceFrameOffset = capacity > 0
+      ? ((Math.floor(frameOffset) % capacity) + capacity) % capacity
+      : 0
   }
 
   clearSource(): void {
     this.sourceLeft = new Float32Array(0)
     this.sourceRight = new Float32Array(0)
     this.sourceLength = 0
+    this.sourceFrameOffset = 0
     this.reset()
   }
 
@@ -139,9 +159,17 @@ export class GranularCore {
         }
 
         const envelope = grainWindow(this.patch.window, phase)
-        const sourceFrame = this.wrapSourceFrame(this.sourcePosition[grain])
-        const sourceLeft = this.readLinear(this.sourceLeft, sourceFrame)
-        const sourceRight = this.readLinear(this.sourceRight, sourceFrame)
+        const sourceFrame = this.wrapLogicalFrame(this.sourcePosition[grain])
+        const sourceLeft = this.readLinear(
+          this.sourceLeft,
+          sourceFrame,
+          this.grainSourceOffset[grain],
+        )
+        const sourceRight = this.readLinear(
+          this.sourceRight,
+          sourceFrame,
+          this.grainSourceOffset[grain],
+        )
 
         left += sourceLeft * envelope * this.gainLeft[grain]
         right += sourceRight * envelope * this.gainRight[grain]
@@ -181,6 +209,7 @@ export class GranularCore {
 
     this.active[slot] = 1
     this.sourcePosition[slot] = regionStart + positionInRegion * (regionLength - 1)
+    this.grainSourceOffset[slot] = this.sourceFrameOffset
     this.step[slot] = direction * 2 ** (pitch / 12)
     this.age[slot] = 0
     this.duration[slot] = durationFrames
@@ -204,19 +233,29 @@ export class GranularCore {
     return oldestSlot
   }
 
-  private readLinear(channel: Float32Array, frame: number): number {
-    const first = Math.floor(frame)
-    const second = this.wrapSourceFrame(first + 1)
-    const fraction = frame - first
+  private readLinear(
+    channel: Float32Array<ArrayBufferLike>,
+    frame: number,
+    frameOffset: number,
+  ): number {
+    const logicalFirst = Math.floor(frame)
+    const logicalSecond = this.wrapLogicalFrame(logicalFirst + 1)
+    const fraction = frame - logicalFirst
+    const first = this.toPhysicalFrame(logicalFirst, frameOffset, channel.length)
+    const second = this.toPhysicalFrame(logicalSecond, frameOffset, channel.length)
     return channel[first] + (channel[second] - channel[first]) * fraction
   }
 
-  private wrapSourceFrame(frame: number): number {
+  private wrapLogicalFrame(frame: number): number {
     const start = Math.floor(this.patch.regionStart * (this.sourceLength - 1))
     const end = Math.max(start + 2, Math.ceil(this.patch.regionEnd * this.sourceLength))
     const length = Math.max(2, end - start)
     const relative = frame - start
     return start + ((relative % length) + length) % length
+  }
+
+  private toPhysicalFrame(logicalFrame: number, frameOffset: number, capacity: number): number {
+    return ((Math.floor(logicalFrame + frameOffset) % capacity) + capacity) % capacity
   }
 
   private wrapUnit(value: number): number {

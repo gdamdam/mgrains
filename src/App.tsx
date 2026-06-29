@@ -3,6 +3,7 @@ import { AudioEngine, type AudioEngineState } from './audio/AudioEngine'
 import {
   DEFAULT_PATCH,
   sanitizePatch,
+  type AudioSourceMode,
   type GrainMode,
   type GrainPatch,
 } from './audio/contracts'
@@ -25,12 +26,24 @@ const MODE_COPY: Record<GrainMode, { title: string; detail: string }> = {
 
 const INITIAL_DEMO_PEAKS = createDemoSource(8_000).peaks
 
+interface SampleView {
+  label: string
+  peaks: Float32Array
+}
+
 export default function App() {
   const engineRef = useRef<AudioEngine | null>(null)
   const [engineState, setEngineState] = useState<AudioEngineState>('idle')
   const [patch, setPatchState] = useState<GrainPatch>({ ...DEFAULT_PATCH })
   const [peaks, setPeaks] = useState<Float32Array | null>(INITIAL_DEMO_PEAKS)
   const [sourceLabel, setSourceLabel] = useState('Generated tone field')
+  const [sampleView, setSampleView] = useState<SampleView>({
+    label: 'Generated tone field',
+    peaks: INITIAL_DEMO_PEAKS,
+  })
+  const [sourceMode, setSourceMode] = useState<AudioSourceMode>('sample')
+  const [frozen, setFrozen] = useState(false)
+  const [liveBufferSeconds, setLiveBufferSeconds] = useState(0)
   const [activeGrains, setActiveGrains] = useState(0)
   const [peak, setPeak] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -56,11 +69,17 @@ export default function App() {
       engine.onTelemetry((telemetry) => {
         setActiveGrains(telemetry.activeGrains)
         setPeak(telemetry.peak)
+        setSourceMode(telemetry.sourceMode)
+        setFrozen(telemetry.frozen)
+        setLiveBufferSeconds(telemetry.liveBufferSeconds)
       })
       await engine.start()
       const source = createDemoSource(engine.sampleRate ?? 48_000)
       setPeaks(source.peaks)
       setSourceLabel(source.label)
+      setSampleView({ label: source.label, peaks: source.peaks })
+      setSourceMode('sample')
+      setFrozen(false)
       engine.setPatch(patch)
       engine.setSource(source)
     } catch (caught) {
@@ -80,9 +99,59 @@ export default function App() {
       engine.setSource(source)
       setPeaks(source.peaks)
       setSourceLabel(source.label)
+      setSampleView({ label: source.label, peaks: source.peaks })
+      setSourceMode('sample')
+      setFrozen(false)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The audio file could not be loaded.')
     }
+  }
+
+  const returnToSample = () => {
+    engineRef.current?.useSampleSource()
+    setSourceMode('sample')
+    setFrozen(false)
+    setPeaks(sampleView.peaks)
+    setSourceLabel(sampleView.label)
+  }
+
+  const startLiveInput = async () => {
+    setError(null)
+    try {
+      const engine = engineRef.current
+      if (!engine || engineState !== 'running') {
+        throw new Error('Start audio before enabling live input.')
+      }
+      const settings = await engine.enableLiveInput()
+      const channels = settings.channelCount ? ` · ${settings.channelCount} ch` : ''
+      setSourceMode('live')
+      setFrozen(false)
+      setLiveBufferSeconds(0)
+      setPeaks(null)
+      setSourceLabel(`Live input${channels}`)
+      updatePatch({ position: 0.92, regionStart: 0, regionEnd: 1, scanSpeed: 0 })
+    } catch (caught) {
+      const message = caught instanceof DOMException && caught.name === 'NotAllowedError'
+        ? 'Live input permission was denied. Allow microphone access and try again.'
+        : caught instanceof Error
+          ? caught.message
+          : 'Live input could not be enabled.'
+      setError(message)
+    }
+  }
+
+  const toggleFreeze = () => {
+    if (sourceMode !== 'live') return
+    const nextFrozen = !frozen
+    engineRef.current?.setFrozen(nextFrozen)
+    setFrozen(nextFrozen)
+  }
+
+  const clearLiveBuffer = () => {
+    if (sourceMode !== 'live') return
+    engineRef.current?.clearLiveBuffer()
+    setFrozen(false)
+    setLiveBufferSeconds(0)
   }
 
   const changeMode = (mode: GrainMode) => {
@@ -115,6 +184,27 @@ export default function App() {
               onChange={(event) => void loadFile(event.currentTarget.files?.[0])}
             />
           </label>
+          <button
+            className="file-button"
+            type="button"
+            disabled={engineState !== 'running'}
+            aria-pressed={sourceMode === 'live'}
+            onClick={() => {
+              if (sourceMode === 'live') returnToSample()
+              else void startLiveInput()
+            }}
+          >
+            {sourceMode === 'live' ? 'Use sample' : 'Live input'}
+          </button>
+          <button
+            className={`file-button ${frozen ? 'is-active' : ''}`}
+            type="button"
+            disabled={sourceMode !== 'live' || liveBufferSeconds < 0.05}
+            aria-pressed={frozen}
+            onClick={toggleFreeze}
+          >
+            {frozen ? 'Frozen' : 'Freeze'}
+          </button>
           <button
             className="audio-button"
             type="button"
@@ -156,8 +246,21 @@ export default function App() {
         regionStart={patch.regionStart}
         regionEnd={patch.regionEnd}
         activeGrains={activeGrains}
+        emptyLabel={sourceMode === 'live'
+          ? `${frozen ? 'Frozen' : 'Capturing'} · ${liveBufferSeconds.toFixed(1)} of 20.0 seconds`
+          : 'Choose a source to begin'}
         onPositionChange={(position) => updatePatch({ position })}
       />
+
+      {sourceMode === 'live' && (
+        <div className="live-strip" aria-live="polite">
+          <span className={`live-indicator ${frozen ? 'is-frozen' : ''}`} />
+          <span>{frozen ? 'Buffer frozen' : 'Capturing live input'}</span>
+          <span>{liveBufferSeconds.toFixed(1)} / 20.0 s</span>
+          <button type="button" onClick={clearLiveBuffer}>Clear buffer</button>
+          <span className="live-warning">Use headphones to prevent feedback.</span>
+        </div>
+      )}
 
       <section className="performance-grid">
         <XYPad
@@ -215,7 +318,7 @@ export default function App() {
       </section>
 
       <footer>
-        <span>Source · {sourceLabel}</span>
+        <span>Source · {sourceLabel}{sourceMode === 'live' ? ` · ${frozen ? 'frozen' : 'rolling'}` : ''}</span>
         <span>AudioWorklet · deterministic 64-grain pool</span>
       </footer>
     </main>
