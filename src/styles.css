@@ -721,6 +721,75 @@ footer {
   cursor: pointer;
 }
 
+.patch-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.patch-actions-hint {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.macro-controls {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgb(20 24 20 / 84%);
+}
+
+.macro-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.macro {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #272d27;
+  border-radius: 10px;
+  background: #101310;
+}
+
+.macro.is-unlinked {
+  opacity: 0.6;
+}
+
+.macro-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.macro-link {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.68rem;
+}
+
+.macro-link.is-active {
+  color: #10130e;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.macro input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
 @media (max-width: 840px) {
   .app-header {
     flex-wrap: wrap;

@@ -10,7 +10,10 @@ import {
   type GrainPatch,
 } from './audio/contracts'
 import { createDemoSource } from './audio/demoSource'
+import { applyMacro } from './audio/macros'
+import { mutatePatch } from './audio/mutate'
 import { AdvancedControls } from './components/AdvancedControls'
+import { MacroControls } from './components/MacroControls'
 import { ParameterControl } from './components/ParameterControl'
 import { ShatterSequencer } from './components/ShatterSequencer'
 import { Waveform } from './components/Waveform'
@@ -65,10 +68,26 @@ export default function App() {
     intensities: EMPTY_GRAIN_VISUALS,
   })
   const [error, setError] = useState<string | null>(null)
+  const undoStackRef = useRef<GrainPatch[]>([])
+  const mutationSeedRef = useRef(1)
+  const [canUndo, setCanUndo] = useState(false)
+  const [macroValues, setMacroValues] = useState<Record<string, number>>({})
+  const [linkedMacros, setLinkedMacros] = useState<Record<string, boolean>>({})
 
   useEffect(() => () => {
     void engineRef.current?.close()
   }, [])
+
+  // Push a patch onto the bounded undo history before a destructive change.
+  const pushUndo = (snapshot: GrainPatch) => {
+    undoStackRef.current = [...undoStackRef.current, snapshot].slice(-16)
+    setCanUndo(true)
+  }
+
+  const applyPatch = (next: GrainPatch) => {
+    engineRef.current?.setPatch(next)
+    setPatchState(next)
+  }
 
   const updatePatch = (changes: Partial<GrainPatch>) => {
     setPatchState((current) => {
@@ -84,6 +103,33 @@ export default function App() {
       engineRef.current?.setPatch(next)
       return next
     })
+  }
+
+  const mutate = () => {
+    const seed = mutationSeedRef.current
+    mutationSeedRef.current += 1
+    pushUndo(patch)
+    applyPatch(mutatePatch(patch, seed))
+  }
+
+  const undo = () => {
+    const stack = undoStackRef.current
+    if (stack.length === 0) return
+    const previous = stack[stack.length - 1]
+    undoStackRef.current = stack.slice(0, -1)
+    setCanUndo(undoStackRef.current.length > 0)
+    applyPatch(previous)
+  }
+
+  const setMacro = (id: string, value: number) => {
+    setMacroValues((previous) => ({ ...previous, [id]: value }))
+    if (linkedMacros[id] !== false) {
+      updatePatch(applyMacro(patch, id, value))
+    }
+  }
+
+  const toggleMacroLink = (id: string) => {
+    setLinkedMacros((previous) => ({ ...previous, [id]: previous[id] === false }))
   }
 
   const startAudio = async () => {
@@ -271,6 +317,12 @@ export default function App() {
 
       {error && <p className="error-message" role="alert">{error}</p>}
 
+      <div className="patch-actions">
+        <button type="button" className="file-button" onClick={mutate}>Mutate</button>
+        <button type="button" className="file-button" onClick={undo} disabled={!canUndo}>Undo</button>
+        <span className="patch-actions-hint">Deterministic variation · Undo restores the prior patch</span>
+      </div>
+
       <Waveform
         peaks={peaks}
         mode={patch.mode}
@@ -398,6 +450,14 @@ export default function App() {
           </div>
         </div>
       </section>
+
+      <MacroControls
+        mode={patch.mode}
+        values={macroValues}
+        linked={linkedMacros}
+        onChange={setMacro}
+        onToggleLink={toggleMacroLink}
+      />
 
       <AdvancedControls patch={patch} onChange={updatePatch} onReset={resetAdvanced} />
 
