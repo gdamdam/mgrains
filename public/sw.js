@@ -1,5 +1,6 @@
-const CACHE_NAME = 'mgrains-shell-v1'
-const SHELL_URLS = ['/', '/manifest.webmanifest', '/mgrains-mark.svg']
+const CACHE_NAME = 'mgrains-shell-v2'
+const APP_BASE = new URL('./', self.location.href).pathname
+const SHELL_URLS = [APP_BASE, `${APP_BASE}manifest.webmanifest`, `${APP_BASE}mgrains-mark.svg`]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)))

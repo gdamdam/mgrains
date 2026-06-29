@@ -2,13 +2,14 @@
   "name": "mgrains",
   "short_name": "mgrains",
   "description": "Capture a moment. Bloom it or break it.",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#0d0f0d",
   "theme_color": "#10120f",
   "icons": [
     {
-      "src": "/mgrains-mark.svg",
+      "src": "./mgrains-mark.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

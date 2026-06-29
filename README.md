@@ -52,6 +52,12 @@ Or run all three:
 npm run check
 ```
 
+## GitHub Pages
+
+Pushes to `main` are verified, built with the `/mgrains/` base path, and deployed by GitHub Actions. The published app is available at [gdamdam.github.io/mgrains](https://gdamdam.github.io/mgrains/).
+
+In the repository's **Settings → Pages**, keep **Source** set to **GitHub Actions**. The deployment workflow can also be started manually from the Actions tab.
+
 ## Repository map
 
 ```text
