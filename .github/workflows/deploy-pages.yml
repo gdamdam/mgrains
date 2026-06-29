@@ -19,8 +19,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      VITE_BASE_PATH: /mgrains/
+    # No VITE_BASE_PATH: the site is served at the root of the custom domain
+    # (mgrains.mpump.live), so assets must be root-relative. A base of /mgrains/
+    # would 404 every asset and render a blank page. dist/CNAME (from public/CNAME)
+    # keeps the custom domain attached across Actions deploys.
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
