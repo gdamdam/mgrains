@@ -60,6 +60,23 @@ describe('GranularCore', () => {
     expect(render(first)).toEqual(render(second))
   })
 
+  it('writes bounded normalized visual telemetry without allocating grain events', () => {
+    const source = makeSource()
+    const core = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    core.setSource(source, source)
+    core.process(new Float32Array(256), new Float32Array(256))
+    const positions = new Float32Array(1)
+    const intensities = new Float32Array(1)
+
+    const count = core.writeVisualState(positions, intensities)
+
+    expect(count).toBe(1)
+    expect(positions[0]).toBeGreaterThanOrEqual(0)
+    expect(positions[0]).toBeLessThanOrEqual(1)
+    expect(intensities[0]).toBeGreaterThanOrEqual(0)
+    expect(intensities[0]).toBeLessThanOrEqual(1)
+  })
+
   it('keeps dense output finite and continuously bounded', () => {
     const source = new Float32Array(512).fill(8)
     const core = new GranularCore({ sampleRate: 48_000, maxGrains: 8 })

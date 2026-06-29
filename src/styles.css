@@ -290,6 +290,24 @@ button.file-button:disabled {
   stroke-width: 1.2;
 }
 
+.grain-visuals {
+  pointer-events: none;
+}
+
+.grain-marker line {
+  stroke: color-mix(in srgb, var(--accent) 70%, white 18%);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px var(--accent-soft));
+}
+
+.grain-marker circle {
+  fill: color-mix(in srgb, var(--accent) 74%, white 16%);
+  stroke: color-mix(in srgb, var(--accent) 92%, white 8%);
+  stroke-width: 1;
+  filter: drop-shadow(0 0 7px var(--accent-soft));
+}
+
 .waveform-empty {
   fill: var(--muted);
   font-size: 15px;
@@ -723,5 +741,11 @@ footer {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+  }
+
+
+  .grain-marker line,
+  .grain-marker circle {
+    filter: none;
   }
 }

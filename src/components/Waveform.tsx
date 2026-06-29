@@ -8,6 +8,9 @@ interface WaveformProps {
   regionStart: number
   regionEnd: number
   activeGrains: number
+  visualGrainCount: number
+  grainPositions: Float32Array<ArrayBufferLike>
+  grainIntensities: Float32Array<ArrayBufferLike>
   emptyLabel?: string
   onPositionChange: (position: number) => void
 }
@@ -22,6 +25,9 @@ export function Waveform({
   regionStart,
   regionEnd,
   activeGrains,
+  visualGrainCount,
+  grainPositions,
+  grainIntensities,
   emptyLabel = 'Choose a source to begin',
   onPositionChange,
 }: WaveformProps) {
@@ -92,6 +98,25 @@ export function Waveform({
             {emptyLabel}
           </text>
         )}
+        <g className="grain-visuals" aria-hidden="true">
+          {Array.from({ length: visualGrainCount }, (_, index) => {
+            const x = grainPositions[index] * WIDTH
+            const intensity = Math.min(1, Math.max(0, grainIntensities[index]))
+            const y = HEIGHT / 2 + Math.sin(index * 2.399) * HEIGHT * 0.27
+            const radius = 2.4 + intensity * 4.6
+            return (
+              <g className="grain-marker" key={index} opacity={0.28 + intensity * 0.72}>
+                <line
+                  x1={x}
+                  x2={x}
+                  y1={y - 7 - intensity * 8}
+                  y2={y + 7 + intensity * 8}
+                />
+                <circle cx={x} cy={y} r={radius} />
+              </g>
+            )
+          })}
+        </g>
         <line
           className="position-line"
           x1={(regionStart + position * (regionEnd - regionStart)) * WIDTH}

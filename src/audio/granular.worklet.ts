@@ -29,6 +29,8 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
   private staticRight: Float32Array<ArrayBufferLike> = new Float32Array(0)
   private sourceMode: AudioSourceMode = 'sample'
   private framesUntilTelemetry = 0
+  private readonly visualPositions = new Float32Array(24)
+  private readonly visualIntensities = new Float32Array(24)
 
   constructor() {
     super()
@@ -94,6 +96,10 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
     this.framesUntilTelemetry -= left.length
 
     if (this.framesUntilTelemetry <= 0) {
+      const visualGrainCount = this.core.writeVisualState(
+        this.visualPositions,
+        this.visualIntensities,
+      )
       const message: EngineToMainMessage = {
         type: 'telemetry',
         frame: this.core.currentFrame,
@@ -103,6 +109,9 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
         liveBufferSeconds: this.liveBuffer.validLength / sampleRate,
         frozen: this.liveBuffer.frozen,
         shatterStep: result.currentStep,
+        visualGrainCount,
+        grainPositions: this.visualPositions,
+        grainIntensities: this.visualIntensities,
       }
       this.port.postMessage(message)
       this.framesUntilTelemetry = Math.max(1, Math.round(sampleRate / 30))

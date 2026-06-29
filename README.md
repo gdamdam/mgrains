@@ -20,6 +20,7 @@ Implemented:
 - distinct Bloom free-running and Shatter sample-frame schedulers;
 - Shatter BPM plus straight/dotted/triplet divisions and a 16-step gate/probability/pitch/reverse/ratchet editor;
 - interactive waveform position, XY surface, and direct Grain Size, Density, Position, and Spray controls;
+- real active-grain read-head markers over the waveform, driven by bounded 30 Hz worklet telemetry;
 - responsive, keyboard-readable, reduced-motion-aware foundation UI;
 - production-only service-worker registration and an offline-shell web manifest;
 - clean timeout/error behavior when browser audio output cannot start.

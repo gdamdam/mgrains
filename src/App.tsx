@@ -33,6 +33,14 @@ interface SampleView {
   peaks: Float32Array
 }
 
+const EMPTY_GRAIN_VISUALS = new Float32Array(0)
+
+interface GrainVisualState {
+  count: number
+  positions: Float32Array<ArrayBufferLike>
+  intensities: Float32Array<ArrayBufferLike>
+}
+
 export default function App() {
   const engineRef = useRef<AudioEngine | null>(null)
   const [engineState, setEngineState] = useState<AudioEngineState>('idle')
@@ -49,6 +57,11 @@ export default function App() {
   const [activeGrains, setActiveGrains] = useState(0)
   const [peak, setPeak] = useState(0)
   const [currentShatterStep, setCurrentShatterStep] = useState(0)
+  const [grainVisuals, setGrainVisuals] = useState<GrainVisualState>({
+    count: 0,
+    positions: EMPTY_GRAIN_VISUALS,
+    intensities: EMPTY_GRAIN_VISUALS,
+  })
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => () => {
@@ -76,6 +89,11 @@ export default function App() {
         setFrozen(telemetry.frozen)
         setLiveBufferSeconds(telemetry.liveBufferSeconds)
         setCurrentShatterStep(telemetry.shatterStep)
+        setGrainVisuals({
+          count: telemetry.visualGrainCount,
+          positions: telemetry.grainPositions,
+          intensities: telemetry.grainIntensities,
+        })
       })
       await engine.start()
       const source = createDemoSource(engine.sampleRate ?? 48_000)
@@ -250,6 +268,9 @@ export default function App() {
         regionStart={patch.regionStart}
         regionEnd={patch.regionEnd}
         activeGrains={activeGrains}
+        visualGrainCount={grainVisuals.count}
+        grainPositions={grainVisuals.positions}
+        grainIntensities={grainVisuals.intensities}
         emptyLabel={sourceMode === 'live'
           ? `${frozen ? 'Frozen' : 'Capturing'} · ${liveBufferSeconds.toFixed(1)} of 20.0 seconds`
           : 'Choose a source to begin'}

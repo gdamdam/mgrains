@@ -76,6 +76,32 @@ export class GranularCore {
     return count
   }
 
+  writeVisualState(
+    positions: Float32Array<ArrayBufferLike>,
+    intensities: Float32Array<ArrayBufferLike>,
+  ): number {
+    if (this.sourceLength < 2) return 0
+    const limit = Math.min(positions.length, intensities.length)
+    let count = 0
+
+    for (let grain = 0; grain < this.maxGrains && count < limit; grain += 1) {
+      if (this.active[grain] === 0) continue
+      const phase = this.age[grain] / this.duration[grain]
+      if (phase >= 1) continue
+      const positionFromCurrentOrigin = this.sourcePosition[grain]
+        + this.grainSourceOffset[grain]
+        - this.sourceFrameOffset
+      const logicalPosition = (
+        (positionFromCurrentOrigin % this.sourceLength) + this.sourceLength
+      ) % this.sourceLength
+      positions[count] = logicalPosition / Math.max(1, this.sourceLength - 1)
+      intensities[count] = grainWindow(this.patch.window, phase)
+      count += 1
+    }
+
+    return count
+  }
+
   setPatch(nextPatch: GrainPatch): void {
     const previousPatch = this.patch
     const previousSeed = this.patch.seed

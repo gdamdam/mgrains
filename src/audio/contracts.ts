@@ -107,6 +107,9 @@ export interface EngineTelemetry {
   liveBufferSeconds: number
   frozen: boolean
   shatterStep: number
+  visualGrainCount: number
+  grainPositions: Float32Array
+  grainIntensities: Float32Array
 }
 
 export type EngineToMainMessage = EngineTelemetry
