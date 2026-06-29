@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AudioEngine, type AudioEngineState } from './audio/AudioEngine'
 import {
   DEFAULT_PATCH,
+  resetAdvancedToDefault,
   SHATTER_DIVISIONS,
   sanitizePatch,
   type AudioSourceMode,
@@ -9,6 +10,7 @@ import {
   type GrainPatch,
 } from './audio/contracts'
 import { createDemoSource } from './audio/demoSource'
+import { AdvancedControls } from './components/AdvancedControls'
 import { ParameterControl } from './components/ParameterControl'
 import { ShatterSequencer } from './components/ShatterSequencer'
 import { Waveform } from './components/Waveform'
@@ -71,6 +73,14 @@ export default function App() {
   const updatePatch = (changes: Partial<GrainPatch>) => {
     setPatchState((current) => {
       const next = sanitizePatch({ ...current, ...changes })
+      engineRef.current?.setPatch(next)
+      return next
+    })
+  }
+
+  const resetAdvanced = () => {
+    setPatchState((current) => {
+      const next = resetAdvancedToDefault(current)
       engineRef.current?.setPatch(next)
       return next
     })
@@ -388,6 +398,8 @@ export default function App() {
           </div>
         </div>
       </section>
+
+      <AdvancedControls patch={patch} onChange={updatePatch} onReset={resetAdvanced} />
 
       <footer>
         <span>Source · {sourceLabel}{sourceMode === 'live' ? ` · ${frozen ? 'frozen' : 'rolling'}` : ''}</span>

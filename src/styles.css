@@ -656,6 +656,71 @@ footer {
   border: 0;
 }
 
+.advanced-panel {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgb(20 24 20 / 84%);
+}
+
+.advanced-panel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advanced-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-summary-title::before {
+  color: var(--accent);
+  content: "▸ ";
+}
+
+.advanced-panel[open] .advanced-summary-title::before {
+  content: "▾ ";
+}
+
+.advanced-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.advanced-panel .parameter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.advanced-panel .select-control {
+  align-content: start;
+}
+
+.advanced-panel .select-control select {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.advanced-reset {
+  justify-self: start;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
 @media (max-width: 840px) {
   .app-header {
     flex-wrap: wrap;
