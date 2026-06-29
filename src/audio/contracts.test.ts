@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PATCH, sanitizePatch } from './contracts'
+import {
+  ADVANCED_PARAM_KEYS,
+  DEFAULT_PATCH,
+  resetAdvancedToDefault,
+  sanitizePatch,
+} from './contracts'
 
 describe('sanitizePatch', () => {
   it('clamps unsafe and non-finite values', () => {
@@ -43,5 +48,47 @@ describe('sanitizePatch', () => {
       reverse: true,
       ratchet: 4,
     })
+  })
+})
+
+describe('resetAdvancedToDefault', () => {
+  const edited = sanitizePatch({
+    ...DEFAULT_PATCH,
+    mode: 'shatter',
+    grainSizeMs: 50,
+    densityHz: 30,
+    position: 0.7,
+    spray: 0.8,
+    bpm: 90,
+    shatterDivision: '1/8',
+    // advanced surface — every field moved off its default
+    regionStart: 0.2,
+    regionEnd: 0.6,
+    timingJitter: 0.5,
+    scanSpeed: 1,
+    pitchSemitones: 7,
+    pitchSpreadSemitones: 5,
+    reverseProbability: 0.9,
+    stereoSpread: 0.2,
+    window: 'hard',
+    outputGain: 0.4,
+  })
+
+  it('restores every advanced parameter to its default', () => {
+    const reset = resetAdvancedToDefault(edited)
+    for (const key of ADVANCED_PARAM_KEYS) {
+      expect(reset[key]).toEqual(DEFAULT_PATCH[key])
+    }
+  })
+
+  it('preserves the main performance parameters', () => {
+    const reset = resetAdvancedToDefault(edited)
+    expect(reset.mode).toBe('shatter')
+    expect(reset.grainSizeMs).toBe(50)
+    expect(reset.densityHz).toBe(30)
+    expect(reset.position).toBe(0.7)
+    expect(reset.spray).toBe(0.8)
+    expect(reset.bpm).toBe(90)
+    expect(reset.shatterDivision).toBe('1/8')
   })
 })

@@ -98,6 +98,21 @@ export const PATCH_RANGES = Object.freeze({
   bpm: [30, 300] as const,
 })
 
+// Parameters surfaced in the Advanced panel rather than on the main performance
+// surface. A single source of truth so the panel and its reset never drift apart.
+export const ADVANCED_PARAM_KEYS = [
+  'regionStart',
+  'regionEnd',
+  'timingJitter',
+  'scanSpeed',
+  'pitchSemitones',
+  'pitchSpreadSemitones',
+  'reverseProbability',
+  'stereoSpread',
+  'window',
+  'outputGain',
+] as const satisfies ReadonlyArray<keyof GrainPatch>
+
 export interface EngineTelemetry {
   type: 'telemetry'
   frame: number
@@ -161,6 +176,17 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
       : DEFAULT_PATCH.shatterDivision,
     shatterSteps: sanitizeShatterSteps(candidate.shatterSteps),
   }
+}
+
+// Reset only the advanced parameters to their defaults, leaving the main
+// performance controls (mode, grain size, density, position, spray, transport,
+// and the Shatter lane) untouched. Sanitized so region ordering stays valid.
+export function resetAdvancedToDefault(patch: GrainPatch): GrainPatch {
+  const next: GrainPatch = { ...patch }
+  for (const key of ADVANCED_PARAM_KEYS) {
+    Object.assign(next, { [key]: DEFAULT_PATCH[key] })
+  }
+  return sanitizePatch(next)
 }
 
 function sanitizeShatterSteps(candidate: ShatterStep[]): ShatterStep[] {
