@@ -186,7 +186,7 @@ export default function App() {
     <main className={`app app--${patch.mode}`}>
       <header className="app-header">
         <div>
-          <p className="eyebrow">granular instrument · foundation build</p>
+          <p className="eyebrow">granular instrument · v{__APP_VERSION__}</p>
           <h1>mgrains</h1>
         </div>
         <div className="engine-status" aria-live="polite">
