@@ -140,6 +140,104 @@ describe('GranularCore', () => {
     expect(right[1]).toBeCloseTo(0.03)
   })
 
+  it('smooths output gain changes instead of applying a sample discontinuity', () => {
+    const source = new Float32Array(512).fill(0.25)
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 4 })
+    const patch = {
+      ...DEFAULT_PATCH,
+      grainSizeMs: 100,
+      densityHz: 10,
+      spray: 0,
+      timingJitter: 0,
+      pitchSpreadSemitones: 0,
+      stereoSpread: 0,
+      window: 'hard' as const,
+      outputGain: 0.8,
+    }
+    core.setPatch(patch)
+    core.setSource(source, source)
+
+    core.setPatch({ ...patch, outputGain: 0 })
+    core.process(new Float32Array(1), new Float32Array(1))
+
+    expect(core.outputGain).toBeGreaterThan(0)
+    expect(core.outputGain).toBeLessThan(0.8)
+
+    core.process(new Float32Array(240), new Float32Array(240))
+    expect(core.outputGain).toBeLessThan(0.001)
+  })
+
+  it('keeps active-grain window and region parameters stable across patch edits', () => {
+    const source = Float32Array.from({ length: 128 }, (_, index) => index < 64 ? 0.1 : 0.8)
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 2 })
+    const patch = {
+      ...DEFAULT_PATCH,
+      grainSizeMs: 100,
+      densityHz: 0.25,
+      position: 0,
+      regionStart: 0,
+      regionEnd: 0.25,
+      spray: 0,
+      timingJitter: 0,
+      scanSpeed: 0,
+      pitchSemitones: 0,
+      pitchSpreadSemitones: 0,
+      reverseProbability: 0,
+      stereoSpread: 0,
+      window: 'hard' as const,
+      outputGain: 1,
+    }
+    core.setPatch(patch)
+    core.setSource(source, source)
+    core.process(new Float32Array(4), new Float32Array(4))
+
+    core.setPatch({
+      ...patch,
+      regionStart: 0.75,
+      regionEnd: 1,
+      window: 'hann',
+    })
+    const left = new Float32Array(1)
+    core.process(left, new Float32Array(1))
+
+    expect(left[0]).toBeCloseTo(0.1)
+  })
+
+  it('switches Bloom and Shatter through silence in less than 200 ms', () => {
+    const source = new Float32Array(512).fill(0.25)
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 8 })
+    const bloomPatch = {
+      ...DEFAULT_PATCH,
+      grainSizeMs: 100,
+      densityHz: 20,
+      spray: 0,
+      timingJitter: 0,
+      pitchSpreadSemitones: 0,
+      stereoSpread: 0,
+      window: 'hard' as const,
+      outputGain: 1,
+    }
+    core.setPatch(bloomPatch)
+    core.setSource(source, source)
+    core.process(new Float32Array(16), new Float32Array(16))
+
+    core.setPatch({
+      ...bloomPatch,
+      mode: 'shatter',
+      bpm: 120,
+      shatterSteps: shatterSteps(),
+    })
+    const fadeOut = new Float32Array(90)
+    core.process(fadeOut, new Float32Array(90))
+
+    expect(core.currentMode).toBe('shatter')
+    expect(core.transitionGain).toBe(0)
+    expect(fadeOut.at(-1)).toBe(0)
+
+    core.process(new Float32Array(90), new Float32Array(90))
+    expect(core.transitionGain).toBe(1)
+  })
+
   it('schedules Shatter steps at sample-frame divisions', () => {
     const core = new GranularCore({ sampleRate: 1_000, maxGrains: 8 })
     core.setPatch({

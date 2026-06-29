@@ -1,7 +1,9 @@
 import {
   DEFAULT_PATCH,
   sanitizePatch,
+  type GrainMode,
   type GrainPatch,
+  type GrainWindow,
 } from '../contracts'
 import { XorShift32 } from './rng'
 import { shatterStepFrames } from './shatterTiming'
@@ -20,6 +22,10 @@ export interface ProcessResult {
 }
 
 const DEFAULT_MAX_GRAINS = 64
+const MODE_TRANSITION_HALF_SECONDS = 0.09
+const OUTPUT_SMOOTHING_SECONDS = 0.02
+
+type ModeTransitionState = 'steady' | 'fade-out' | 'fade-in'
 
 export class GranularCore {
   readonly sampleRate: number
@@ -36,6 +42,13 @@ export class GranularCore {
   private shatterStepIndex = 0
   private shatterRatchetIndex = 0
   private lastShatterStep = 0
+  private pendingPatch: GrainPatch | null = null
+  private modeTransitionState: ModeTransitionState = 'steady'
+  private modeTransitionGain = 1
+  private readonly modeTransitionStep: number
+  private smoothedOutputGain = DEFAULT_PATCH.outputGain
+  private targetOutputGain = DEFAULT_PATCH.outputGain
+  private readonly outputSmoothingCoefficient: number
 
   private readonly active: Uint8Array
   private readonly sourcePosition: Float64Array
@@ -45,6 +58,9 @@ export class GranularCore {
   private readonly duration: Float64Array
   private readonly gainLeft: Float32Array
   private readonly gainRight: Float32Array
+  private readonly windowCode: Uint8Array
+  private readonly regionStartFrame: Float64Array
+  private readonly regionLengthFrames: Float64Array
 
   constructor({ sampleRate, maxGrains = DEFAULT_MAX_GRAINS }: GranularCoreOptions) {
     if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
@@ -53,6 +69,10 @@ export class GranularCore {
 
     this.sampleRate = sampleRate
     this.maxGrains = Math.max(1, Math.floor(maxGrains))
+    this.modeTransitionStep = 1 / Math.max(1, sampleRate * MODE_TRANSITION_HALF_SECONDS)
+    this.outputSmoothingCoefficient = 1 - Math.exp(
+      -1 / Math.max(1, sampleRate * OUTPUT_SMOOTHING_SECONDS),
+    )
     this.rng = new XorShift32(this.patch.seed)
     this.active = new Uint8Array(this.maxGrains)
     this.sourcePosition = new Float64Array(this.maxGrains)
@@ -62,6 +82,9 @@ export class GranularCore {
     this.duration = new Float64Array(this.maxGrains)
     this.gainLeft = new Float32Array(this.maxGrains)
     this.gainRight = new Float32Array(this.maxGrains)
+    this.windowCode = new Uint8Array(this.maxGrains)
+    this.regionStartFrame = new Float64Array(this.maxGrains)
+    this.regionLengthFrames = new Float64Array(this.maxGrains)
   }
 
   get currentFrame(): number {
@@ -74,6 +97,18 @@ export class GranularCore {
       count += this.active[index]
     }
     return count
+  }
+
+  get currentMode(): GrainMode {
+    return this.patch.mode
+  }
+
+  get transitionGain(): number {
+    return this.modeTransitionGain
+  }
+
+  get outputGain(): number {
+    return this.smoothedOutputGain
   }
 
   writeVisualState(
@@ -95,7 +130,7 @@ export class GranularCore {
         (positionFromCurrentOrigin % this.sourceLength) + this.sourceLength
       ) % this.sourceLength
       positions[count] = logicalPosition / Math.max(1, this.sourceLength - 1)
-      intensities[count] = grainWindow(this.patch.window, phase)
+      intensities[count] = grainWindow(decodeWindow(this.windowCode[grain]), phase)
       count += 1
     }
 
@@ -103,17 +138,35 @@ export class GranularCore {
   }
 
   setPatch(nextPatch: GrainPatch): void {
-    const previousPatch = this.patch
-    const previousSeed = this.patch.seed
-    this.patch = sanitizePatch(nextPatch)
-    if (this.patch.seed !== previousSeed) this.rng.reset(this.patch.seed)
-    if (
-      this.patch.mode !== previousPatch.mode
-      || this.patch.bpm !== previousPatch.bpm
-      || this.patch.shatterDivision !== previousPatch.shatterDivision
-    ) {
-      this.resyncScheduler()
+    const next = sanitizePatch(nextPatch)
+
+    if (this.sourceLength < 2) {
+      this.pendingPatch = null
+      this.modeTransitionState = 'steady'
+      this.modeTransitionGain = 1
+      this.applyPatch(next, true)
+      this.smoothedOutputGain = this.targetOutputGain
+      return
     }
+
+    if (this.modeTransitionState === 'fade-out') {
+      if (next.mode === this.patch.mode) {
+        this.pendingPatch = null
+        this.applyPatch(next)
+        this.modeTransitionState = 'fade-in'
+      } else {
+        this.pendingPatch = next
+      }
+      return
+    }
+
+    if (next.mode !== this.patch.mode) {
+      this.pendingPatch = next
+      this.modeTransitionState = 'fade-out'
+      return
+    }
+
+    this.applyPatch(next)
   }
 
   setSource(left: Float32Array, right: Float32Array): void {
@@ -153,7 +206,11 @@ export class GranularCore {
     this.reset()
   }
 
-  reset(seed = this.patch.seed): void {
+  reset(seed?: number): void {
+    if (this.pendingPatch) {
+      this.applyPatch(this.pendingPatch, true)
+      this.pendingPatch = null
+    }
     this.active.fill(0)
     this.age.fill(0)
     this.frame = 0
@@ -161,7 +218,10 @@ export class GranularCore {
     this.shatterStepIndex = 0
     this.shatterRatchetIndex = 0
     this.lastShatterStep = 0
-    this.rng.reset(seed)
+    this.modeTransitionState = 'steady'
+    this.modeTransitionGain = 1
+    this.smoothedOutputGain = this.targetOutputGain
+    this.rng.reset(seed ?? this.patch.seed)
   }
 
   process(outputLeft: Float32Array, outputRight: Float32Array): ProcessResult {
@@ -182,6 +242,10 @@ export class GranularCore {
 
     for (let offset = 0; offset < outputLeft.length; offset += 1) {
       const absoluteFrame = this.frame + offset
+      this.advanceModeTransition(absoluteFrame)
+      this.smoothedOutputGain += (
+        this.targetOutputGain - this.smoothedOutputGain
+      ) * this.outputSmoothingCoefficient
 
       if (absoluteFrame >= this.nextGrainFrame) {
         if (this.patch.mode === 'shatter') {
@@ -207,17 +271,25 @@ export class GranularCore {
           continue
         }
 
-        const envelope = grainWindow(this.patch.window, phase)
-        const sourceFrame = this.wrapLogicalFrame(this.sourcePosition[grain])
+        const envelope = grainWindow(decodeWindow(this.windowCode[grain]), phase)
+        const sourceFrame = this.wrapFrameInRegion(
+          this.sourcePosition[grain],
+          this.regionStartFrame[grain],
+          this.regionLengthFrames[grain],
+        )
         const sourceLeft = this.readLinear(
           this.sourceLeft,
           sourceFrame,
           this.grainSourceOffset[grain],
+          this.regionStartFrame[grain],
+          this.regionLengthFrames[grain],
         )
         const sourceRight = this.readLinear(
           this.sourceRight,
           sourceFrame,
           this.grainSourceOffset[grain],
+          this.regionStartFrame[grain],
+          this.regionLengthFrames[grain],
         )
 
         left += sourceLeft * envelope * this.gainLeft[grain]
@@ -227,8 +299,9 @@ export class GranularCore {
         this.age[grain] += 1
       }
 
-      left = this.sanitizeSample(left)
-      right = this.sanitizeSample(right)
+      const masterGain = this.smoothedOutputGain * this.modeTransitionGain
+      left = this.sanitizeSample(left * masterGain)
+      right = this.sanitizeSample(right * masterGain)
       outputLeft[offset] = left
       outputRight[offset] = right
       peak = Math.max(peak, Math.abs(left), Math.abs(right))
@@ -280,7 +353,7 @@ export class GranularCore {
     const pan = this.rng.nextBipolar() * this.patch.stereoSpread
     const durationFrames = Math.max(2, this.patch.grainSizeMs * 0.001 * this.sampleRate)
     const expectedOverlap = Math.max(1, this.patch.densityHz * durationFrames / this.sampleRate)
-    const normalizedGain = this.patch.outputGain / Math.sqrt(expectedOverlap)
+    const normalizedGain = 1 / Math.sqrt(expectedOverlap)
 
     this.active[slot] = 1
     this.sourcePosition[slot] = regionStart + positionInRegion * (regionLength - 1)
@@ -290,6 +363,9 @@ export class GranularCore {
     this.duration[slot] = durationFrames
     this.gainLeft[slot] = normalizedGain * (pan > 0 ? Math.cos(pan * Math.PI * 0.5) : 1)
     this.gainRight[slot] = normalizedGain * (pan < 0 ? Math.cos(-pan * Math.PI * 0.5) : 1)
+    this.windowCode[slot] = encodeWindow(this.patch.window)
+    this.regionStartFrame[slot] = regionStart
+    this.regionLengthFrames[slot] = regionLength
   }
 
   private findGrainSlot(): number {
@@ -308,8 +384,46 @@ export class GranularCore {
     return oldestSlot
   }
 
-  private resyncScheduler(): void {
-    this.nextGrainFrame = this.frame
+  private applyPatch(nextPatch: GrainPatch, forceResync = false, schedulerFrame = this.frame): void {
+    const previousPatch = this.patch
+    const previousSeed = previousPatch.seed
+    this.patch = nextPatch
+    this.targetOutputGain = nextPatch.outputGain
+    if (nextPatch.seed !== previousSeed) this.rng.reset(nextPatch.seed)
+    if (
+      forceResync
+      || nextPatch.mode !== previousPatch.mode
+      || nextPatch.bpm !== previousPatch.bpm
+      || nextPatch.shatterDivision !== previousPatch.shatterDivision
+    ) {
+      this.resyncScheduler(schedulerFrame)
+    }
+  }
+
+  private advanceModeTransition(absoluteFrame: number): void {
+    if (this.modeTransitionState === 'fade-out') {
+      this.modeTransitionGain = Math.max(0, this.modeTransitionGain - this.modeTransitionStep)
+      if (this.modeTransitionGain <= this.modeTransitionStep * 0.5) {
+        this.modeTransitionGain = 0
+        if (this.pendingPatch) {
+          this.active.fill(0)
+          this.age.fill(0)
+          this.applyPatch(this.pendingPatch, true, absoluteFrame)
+          this.pendingPatch = null
+        }
+        this.modeTransitionState = 'fade-in'
+      }
+    } else if (this.modeTransitionState === 'fade-in') {
+      this.modeTransitionGain = Math.min(1, this.modeTransitionGain + this.modeTransitionStep)
+      if (this.modeTransitionGain >= 1 - this.modeTransitionStep * 0.5) {
+        this.modeTransitionGain = 1
+        this.modeTransitionState = 'steady'
+      }
+    }
+  }
+
+  private resyncScheduler(schedulerFrame = this.frame): void {
+    this.nextGrainFrame = schedulerFrame
     this.shatterStepIndex = 0
     this.shatterRatchetIndex = 0
     this.lastShatterStep = 0
@@ -319,19 +433,18 @@ export class GranularCore {
     channel: Float32Array<ArrayBufferLike>,
     frame: number,
     frameOffset: number,
+    regionStart: number,
+    regionLength: number,
   ): number {
     const logicalFirst = Math.floor(frame)
-    const logicalSecond = this.wrapLogicalFrame(logicalFirst + 1)
+    const logicalSecond = this.wrapFrameInRegion(logicalFirst + 1, regionStart, regionLength)
     const fraction = frame - logicalFirst
     const first = this.toPhysicalFrame(logicalFirst, frameOffset, channel.length)
     const second = this.toPhysicalFrame(logicalSecond, frameOffset, channel.length)
     return channel[first] + (channel[second] - channel[first]) * fraction
   }
 
-  private wrapLogicalFrame(frame: number): number {
-    const start = Math.floor(this.patch.regionStart * (this.sourceLength - 1))
-    const end = Math.max(start + 2, Math.ceil(this.patch.regionEnd * this.sourceLength))
-    const length = Math.max(2, end - start)
+  private wrapFrameInRegion(frame: number, start: number, length: number): number {
     const relative = frame - start
     return start + ((relative % length) + length) % length
   }
@@ -350,5 +463,25 @@ export class GranularCore {
     if (magnitude <= 0.95) return value
     const compressed = 0.95 + 0.05 * Math.tanh((magnitude - 0.95) / 0.05)
     return Math.sign(value) * compressed
+  }
+}
+
+function encodeWindow(window: GrainWindow): number {
+  switch (window) {
+    case 'percussive': return 1
+    case 'hard': return 2
+    case 'reverse': return 3
+    case 'hann':
+    default: return 0
+  }
+}
+
+function decodeWindow(code: number): GrainWindow {
+  switch (code) {
+    case 1: return 'percussive'
+    case 2: return 'hard'
+    case 3: return 'reverse'
+    case 0:
+    default: return 'hann'
   }
 }
