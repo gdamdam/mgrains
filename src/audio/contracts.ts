@@ -49,6 +49,12 @@ export interface GrainPatch {
   damp: number
   space: number
   repeat: number
+  tapeAmount: number
+  tapeTone: number
+  formantAmount: number
+  formantVowel: number
+  ringModAmount: number
+  ringModHz: number
   seed: number
   bpm: number
   shatterDivision: ShatterDivision
@@ -87,6 +93,12 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   damp: 0,
   space: 0,
   repeat: 0,
+  tapeAmount: 0,
+  tapeTone: 0.5,
+  formantAmount: 0,
+  formantVowel: 0,
+  ringModAmount: 0,
+  ringModHz: 440,
   seed: 0x6d677261,
   bpm: 120,
   shatterDivision: '1/16',
@@ -110,6 +122,12 @@ export const PATCH_RANGES = Object.freeze({
   damp: [0, 1] as const,
   space: [0, 1] as const,
   repeat: [0, 1] as const,
+  tapeAmount: [0, 1] as const,
+  tapeTone: [0, 1] as const,
+  formantAmount: [0, 1] as const,
+  formantVowel: [0, 1] as const,
+  ringModAmount: [0, 1] as const,
+  ringModHz: [1, 4000] as const,
   bpm: [30, 300] as const,
 })
 
@@ -194,6 +212,12 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
     damp: clamp(candidate.damp, ...PATCH_RANGES.damp),
     space: clamp(candidate.space, ...PATCH_RANGES.space),
     repeat: clamp(candidate.repeat, ...PATCH_RANGES.repeat),
+    tapeAmount: clamp(candidate.tapeAmount, ...PATCH_RANGES.tapeAmount),
+    tapeTone: clamp(candidate.tapeTone, ...PATCH_RANGES.tapeTone),
+    formantAmount: clamp(candidate.formantAmount, ...PATCH_RANGES.formantAmount),
+    formantVowel: clamp(candidate.formantVowel, ...PATCH_RANGES.formantVowel),
+    ringModAmount: clamp(candidate.ringModAmount, ...PATCH_RANGES.ringModAmount),
+    ringModHz: clamp(candidate.ringModHz, ...PATCH_RANGES.ringModHz),
     seed: Number.isFinite(candidate.seed) ? candidate.seed >>> 0 : DEFAULT_PATCH.seed,
     bpm: clamp(candidate.bpm, ...PATCH_RANGES.bpm),
     shatterDivision: SHATTER_DIVISIONS.includes(candidate.shatterDivision)

@@ -6,9 +6,12 @@ import {
   type GrainWindow,
 } from '../contracts'
 import { bitcrush, OnePole, softClipDrive } from './effects'
+import { Formant } from './formant'
 import { Reverb } from './reverb'
+import { RingMod } from './ringMod'
 import { XorShift32 } from './rng'
 import { shatterStepFrames } from './shatterTiming'
+import { Tape } from './tape'
 import { divisionToSeconds, TempoDelay } from './tempoDelay'
 import { grainWindow } from './windows'
 
@@ -37,6 +40,13 @@ const DAMP_MIN_CUTOFF = 0.04
 const REPEAT_DIVISION = 0.1875
 
 type ModeTransitionState = 'steady' | 'fade-out' | 'fade-in'
+
+// A stereo effect that can render allocation-free into a 2-element buffer and
+// clear its state. Reverb/TempoDelay/Tape/Formant/RingMod all satisfy this.
+interface StereoFx {
+  processInto(left: number, right: number, out: Float64Array): void
+  reset(): void
+}
 
 export class GranularCore {
   readonly sampleRate: number
@@ -78,6 +88,21 @@ export class GranularCore {
   private readonly reverb: Reverb
   private readonly delay: TempoDelay
   private readonly fxScratch = new Float64Array(2)
+  private smoothedTape = 0
+  private targetTape = 0
+  private tapeTone = DEFAULT_PATCH.tapeTone
+  private smoothedFormant = 0
+  private targetFormant = 0
+  private formantVowel = 0
+  private smoothedRingMod = 0
+  private targetRingMod = 0
+  private ringModHz = DEFAULT_PATCH.ringModHz
+  private tapeActive = false
+  private formantActive = false
+  private ringModActive = false
+  private readonly tape: Tape
+  private readonly formant: Formant
+  private readonly ringMod: RingMod
 
   private readonly active: Uint8Array
   private readonly sourcePosition: Float64Array
@@ -116,6 +141,9 @@ export class GranularCore {
     this.regionLengthFrames = new Float64Array(this.maxGrains)
     this.reverb = new Reverb(this.sampleRate)
     this.delay = new TempoDelay(this.sampleRate)
+    this.tape = new Tape(this.sampleRate)
+    this.formant = new Formant(this.sampleRate)
+    this.ringMod = new RingMod(this.sampleRate)
     this.repeatTimeSeconds = divisionToSeconds(REPEAT_DIVISION, this.patch.bpm)
   }
 
@@ -259,8 +287,14 @@ export class GranularCore {
     this.filterRight.reset()
     this.reverb.reset()
     this.delay.reset()
+    this.tape.reset()
+    this.formant.reset()
+    this.ringMod.reset()
     this.spaceActive = false
     this.repeatActive = false
+    this.tapeActive = false
+    this.formantActive = false
+    this.ringModActive = false
     this.rng.reset(seed ?? this.patch.seed)
   }
 
@@ -270,6 +304,27 @@ export class GranularCore {
     this.smoothedDamp = this.targetDamp
     this.smoothedSpace = this.targetSpace
     this.smoothedRepeat = this.targetRepeat
+    this.smoothedTape = this.targetTape
+    this.smoothedFormant = this.targetFormant
+    this.smoothedRingMod = this.targetRingMod
+  }
+
+  // Run a stereo FX gated by `amount` (exact dry bypass at <= FX_EPSILON, with a
+  // reset on disengage), wet-mixing the result into fxScratch. Returns the new
+  // active flag. Caller reads fxScratch[0]/[1] for the mixed L/R.
+  private runStereoFx(fx: StereoFx, amount: number, active: boolean, left: number, right: number): boolean {
+    if (amount > FX_EPSILON) {
+      fx.processInto(left, right, this.fxScratch)
+      const wetL = this.fxScratch[0]
+      const wetR = this.fxScratch[1]
+      this.fxScratch[0] = left + (wetL - left) * amount
+      this.fxScratch[1] = right + (wetR - right) * amount
+      return true
+    }
+    if (active) fx.reset()
+    this.fxScratch[0] = left
+    this.fxScratch[1] = right
+    return false
   }
 
   // Per-channel coloration: drive (saturation) -> crush (bit reduction) ->
@@ -316,6 +371,9 @@ export class GranularCore {
       tone: 0.4,
       width: 0.7,
     })
+    this.tape.setParams({ drive: 0.2 + this.targetTape * 0.6, tone: this.tapeTone })
+    this.formant.setParams({ vowel: this.formantVowel, amount: 1 })
+    this.ringMod.setParams({ frequency: this.ringModHz, amount: 1 })
 
     for (let offset = 0; offset < outputLeft.length; offset += 1) {
       const absoluteFrame = this.frame + offset
@@ -328,6 +386,9 @@ export class GranularCore {
       this.smoothedDamp += (this.targetDamp - this.smoothedDamp) * this.outputSmoothingCoefficient
       this.smoothedSpace += (this.targetSpace - this.smoothedSpace) * this.outputSmoothingCoefficient
       this.smoothedRepeat += (this.targetRepeat - this.smoothedRepeat) * this.outputSmoothingCoefficient
+      this.smoothedTape += (this.targetTape - this.smoothedTape) * this.outputSmoothingCoefficient
+      this.smoothedFormant += (this.targetFormant - this.smoothedFormant) * this.outputSmoothingCoefficient
+      this.smoothedRingMod += (this.targetRingMod - this.smoothedRingMod) * this.outputSmoothingCoefficient
 
       if (absoluteFrame >= this.nextGrainFrame) {
         if (this.patch.mode === 'shatter') {
@@ -385,28 +446,24 @@ export class GranularCore {
       let mixL = this.colorFx(left * masterGain, this.filterLeft)
       let mixR = this.colorFx(right * masterGain, this.filterRight)
 
-      // Stereo Space (reverb), wet-mixed by the smoothed amount. Reset on
-      // disengage so a re-engaged reverb starts from a clean tail.
-      if (this.smoothedSpace > FX_EPSILON) {
-        this.reverb.processInto(mixL, mixR, this.fxScratch)
-        mixL += (this.fxScratch[0] - mixL) * this.smoothedSpace
-        mixR += (this.fxScratch[1] - mixR) * this.smoothedSpace
-        this.spaceActive = true
-      } else if (this.spaceActive) {
-        this.reverb.reset()
-        this.spaceActive = false
-      }
-
-      // Stereo Repeat (tempo-synced delay), same wet-mix + disengage handling.
-      if (this.smoothedRepeat > FX_EPSILON) {
-        this.delay.processInto(mixL, mixR, this.fxScratch)
-        mixL += (this.fxScratch[0] - mixL) * this.smoothedRepeat
-        mixR += (this.fxScratch[1] - mixR) * this.smoothedRepeat
-        this.repeatActive = true
-      } else if (this.repeatActive) {
-        this.delay.reset()
-        this.repeatActive = false
-      }
+      // Stereo FX chain: tape -> ring mod -> formant -> space (reverb) ->
+      // repeat (delay). Each is exact-dry-bypassed at zero and wet-mixed by its
+      // smoothed amount (see runStereoFx).
+      this.tapeActive = this.runStereoFx(this.tape, this.smoothedTape, this.tapeActive, mixL, mixR)
+      mixL = this.fxScratch[0]
+      mixR = this.fxScratch[1]
+      this.ringModActive = this.runStereoFx(this.ringMod, this.smoothedRingMod, this.ringModActive, mixL, mixR)
+      mixL = this.fxScratch[0]
+      mixR = this.fxScratch[1]
+      this.formantActive = this.runStereoFx(this.formant, this.smoothedFormant, this.formantActive, mixL, mixR)
+      mixL = this.fxScratch[0]
+      mixR = this.fxScratch[1]
+      this.spaceActive = this.runStereoFx(this.reverb, this.smoothedSpace, this.spaceActive, mixL, mixR)
+      mixL = this.fxScratch[0]
+      mixR = this.fxScratch[1]
+      this.repeatActive = this.runStereoFx(this.delay, this.smoothedRepeat, this.repeatActive, mixL, mixR)
+      mixL = this.fxScratch[0]
+      mixR = this.fxScratch[1]
 
       left = this.sanitizeSample(mixL)
       right = this.sanitizeSample(mixR)
@@ -502,6 +559,12 @@ export class GranularCore {
     this.targetDamp = nextPatch.damp
     this.targetSpace = nextPatch.space
     this.targetRepeat = nextPatch.repeat
+    this.targetTape = nextPatch.tapeAmount
+    this.tapeTone = nextPatch.tapeTone
+    this.targetFormant = nextPatch.formantAmount
+    this.formantVowel = nextPatch.formantVowel
+    this.targetRingMod = nextPatch.ringModAmount
+    this.ringModHz = nextPatch.ringModHz
     this.repeatTimeSeconds = divisionToSeconds(REPEAT_DIVISION, nextPatch.bpm)
     if (nextPatch.seed !== previousSeed) this.rng.reset(nextPatch.seed)
     if (
