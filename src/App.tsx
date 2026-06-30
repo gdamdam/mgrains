@@ -10,8 +10,10 @@ import {
   type GrainPatch,
 } from './audio/contracts'
 import { createDemoSource } from './audio/demoSource'
+import { FACTORY_PRESETS } from './audio/factoryPresets'
 import { applyMacro } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
+import { MidiInput } from './instrument/midi'
 import { controlForKey, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
 import { MotionRecorder } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
@@ -182,11 +184,22 @@ export default function App() {
     const onKeyUp = (event: KeyboardEvent) => {
       if (isNoteKey(event.code) && held.delete(event.code)) pushNotes()
     }
+    // MIDI input plays the same held-note voices; middle C (60) maps to offset 0.
+    const midi = new MidiInput((event) => {
+      if (event.type === 'noteon') {
+        held.set(`midi-${event.note}`, event.note - 60)
+        pushNotes()
+      } else if (event.type === 'noteoff' && held.delete(`midi-${event.note}`)) {
+        pushNotes()
+      }
+    })
+    void midi.enable().catch(() => { /* Web MIDI unavailable or permission denied */ })
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      midi.disable()
       held.clear()
       engineRef.current?.setNotes([])
     }
@@ -252,7 +265,8 @@ export default function App() {
 
   const savePreset = () => {
     const name = presetName.trim() || 'Untitled'
-    presetStoreRef.current.save(serializePreset(name, patch, epochMs()))
+    const motion = hasMotion ? motionRef.current.serialize() : undefined
+    presetStoreRef.current.save(serializePreset(name, patch, epochMs(), { motion, sourceLabel }))
       .then(() => {
         setPresetName('')
         refreshPresets()
@@ -262,8 +276,27 @@ export default function App() {
 
   const loadPreset = (name: string) => {
     presetStoreRef.current.load(name)
-      .then((preset) => { if (preset) applyPatch(preset.patch) })
+      .then((preset) => {
+        if (!preset) return
+        applyPatch(preset.patch)
+        if (preset.motion) {
+          cancelMotionLoop()
+          motionRef.current = MotionRecorder.deserialize(preset.motion)
+          motionLoopRef.current = preset.motion.durationMs
+          setMotionState('idle')
+          setHasMotion(preset.motion.durationMs > 0)
+        }
+        if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
+          setError(`Preset "${name}" was saved with source "${preset.sourceLabel}". Load that source to match its motion and position.`)
+        }
+      })
       .catch(() => setError('Could not load preset.'))
+  }
+
+  const loadFactory = (name: string) => {
+    const preset = FACTORY_PRESETS.find((entry) => entry.name === name)
+    if (!preset) return
+    applyPatch(sanitizePatch({ ...DEFAULT_PATCH, ...preset.patch }))
   }
 
   const deletePreset = (name: string) => {
@@ -727,10 +760,12 @@ export default function App() {
 
       <PresetControls
         presets={presets}
+        factory={FACTORY_PRESETS}
         name={presetName}
         onNameChange={setPresetName}
         onSave={savePreset}
         onLoad={loadPreset}
+        onLoadFactory={loadFactory}
         onDelete={deletePreset}
       />
 

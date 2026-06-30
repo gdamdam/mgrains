@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PATCH, PATCH_RANGES, sanitizePatch } from '../audio/contracts'
+import type { MotionData } from '../performance/motion'
 import {
   PRESET_SCHEMA_VERSION,
   deserializePreset,
@@ -105,5 +106,77 @@ describe('serializePreset / deserializePreset', () => {
     expect(typeof deserializePreset({ patch: DEFAULT_PATCH }).name).toBe('string')
     expect(typeof deserializePreset({ name: 99, patch: DEFAULT_PATCH }).name).toBe('string')
     expect(deserializePreset({ name: 99, patch: DEFAULT_PATCH }).name.length).toBeGreaterThan(0)
+  })
+
+  it('stamps schema version 2', () => {
+    expect(PRESET_SCHEMA_VERSION).toBe(2)
+  })
+
+  it('round-trips motion and sourceLabel supplied via options', () => {
+    const motion: MotionData = {
+      samples: [
+        { tMs: 0, value: 0.1 },
+        { tMs: 250, value: 0.6 },
+        { tMs: 500, value: 0.42 },
+      ],
+      durationMs: 500,
+    }
+    const preset = serializePreset('Moving', DEFAULT_PATCH, 1_700_000_000_000, {
+      motion,
+      sourceLabel: 'kick.wav',
+    })
+    const roundTripped = deserializePreset(JSON.parse(JSON.stringify(preset)))
+
+    expect(preset.schemaVersion).toBe(2)
+    expect(roundTripped).toEqual(preset)
+    expect(roundTripped.motion).toEqual(motion)
+    expect(roundTripped.sourceLabel).toBe('kick.wav')
+  })
+
+  it('omits motion and sourceLabel when no options are supplied', () => {
+    const preset = serializePreset('Plain', DEFAULT_PATCH, 42)
+
+    expect(preset.motion).toBeUndefined()
+    expect(preset.sourceLabel).toBeUndefined()
+
+    const roundTripped = deserializePreset(JSON.parse(JSON.stringify(preset)))
+    expect(roundTripped.motion).toBeUndefined()
+    expect(roundTripped.sourceLabel).toBeUndefined()
+  })
+
+  it('migrates a v1-shaped preset (no motion/sourceLabel) with those fields absent', () => {
+    const preset = deserializePreset({
+      name: 'V1',
+      schemaVersion: 1,
+      createdAt: 123,
+      patch: { ...DEFAULT_PATCH },
+    })
+
+    expect(preset.name).toBe('V1')
+    expect(preset.schemaVersion).toBe(1)
+    expect(preset.motion).toBeUndefined()
+    expect(preset.sourceLabel).toBeUndefined()
+    expect(preset.patch).toEqual(sanitizePatch(DEFAULT_PATCH))
+  })
+
+  it('drops malformed motion to undefined without throwing', () => {
+    const cases: unknown[] = [
+      { motion: { samples: 'nope', durationMs: 100 } },
+      { motion: { samples: [{ tMs: 0, value: 0 }], durationMs: Infinity } },
+      { motion: { samples: [{ tMs: 'x', value: 0 }], durationMs: 100 } },
+      { motion: { durationMs: 100 } },
+      { motion: { samples: [{ tMs: 0, value: 0 }] } },
+      { motion: 7 },
+      { motion: null },
+    ]
+    for (const raw of cases) {
+      expect(() => deserializePreset(raw)).not.toThrow()
+      expect(deserializePreset(raw).motion).toBeUndefined()
+    }
+  })
+
+  it('drops a non-string sourceLabel to undefined', () => {
+    expect(deserializePreset({ sourceLabel: 99 }).sourceLabel).toBeUndefined()
+    expect(deserializePreset({ sourceLabel: 'sample.wav' }).sourceLabel).toBe('sample.wav')
   })
 })

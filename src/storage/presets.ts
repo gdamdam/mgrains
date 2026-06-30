@@ -1,27 +1,36 @@
 import { DEFAULT_PATCH, sanitizePatch, type GrainPatch } from '../audio/contracts'
+import type { MotionData } from '../performance/motion'
 
 // Bump when the Preset envelope (name/schemaVersion/createdAt) changes shape.
 // Patch-level migration is delegated to sanitizePatch, which already coerces
 // missing/old/invalid GrainPatch fields back into safe ranges.
-export const PRESET_SCHEMA_VERSION = 1
+// v2 adds optional `motion` and `sourceLabel`; v1 presets migrate forward by
+// simply lacking those fields (see deserializePreset).
+export const PRESET_SCHEMA_VERSION = 2
 
 export interface Preset {
   name: string
   schemaVersion: number
   patch: GrainPatch
   createdAt: number
+  // Optional motion automation recording captured alongside the patch.
+  motion?: MotionData
+  // Optional label of the audio source, used to prompt a relink on load.
+  sourceLabel?: string
 }
 
 const DEFAULT_PRESET_NAME = 'Untitled'
 
 // createdAt is supplied by the caller (not Date.now here) so serialization stays
-// deterministic and testable.
+// deterministic and testable. The optional `options` arg is appended so the
+// existing positional callers keep working unchanged.
 export function serializePreset(
   name: string,
   patch: GrainPatch,
   createdAt: number,
+  options?: { motion?: MotionData; sourceLabel?: string },
 ): Preset {
-  return {
+  const preset: Preset = {
     name: coerceName(name),
     schemaVersion: PRESET_SCHEMA_VERSION,
     // Own a sanitized copy so the stored patch never aliases a frozen default
@@ -29,6 +38,16 @@ export function serializePreset(
     patch: sanitizePatch(patch),
     createdAt: Number.isFinite(createdAt) ? createdAt : 0,
   }
+
+  // Only attach motion/sourceLabel when given, and clone/validate defensively
+  // so the stored preset never aliases caller-owned data or carries garbage.
+  const motion = parseMotion(options?.motion)
+  if (motion !== undefined) preset.motion = motion
+
+  const sourceLabel = parseSourceLabel(options?.sourceLabel)
+  if (sourceLabel !== undefined) preset.sourceLabel = sourceLabel
+
+  return preset
 }
 
 // Defensively rebuild a Preset from an unknown value (e.g. parsed from storage).
@@ -53,12 +72,44 @@ export function deserializePreset(raw: unknown): Preset {
     ? { ...DEFAULT_PATCH, ...record.patch }
     : DEFAULT_PATCH
 
-  return {
+  const preset: Preset = {
     name,
     schemaVersion,
     patch: sanitizePatch(patchCandidate as GrainPatch),
     createdAt,
   }
+
+  // v1 presets simply lack these; v2 presets carry them when valid. Bad values
+  // (and v1 absence) leave the fields undefined rather than throwing.
+  const motion = parseMotion(record.motion)
+  if (motion !== undefined) preset.motion = motion
+
+  const sourceLabel = parseSourceLabel(record.sourceLabel)
+  if (sourceLabel !== undefined) preset.sourceLabel = sourceLabel
+
+  return preset
+}
+
+// Accept only a well-formed MotionData: an object with an array `samples` of
+// { tMs, value } finite numbers and a finite `durationMs`. Returns a defensive
+// clone, or undefined for anything malformed. Never throws.
+function parseMotion(value: unknown): MotionData | undefined {
+  if (!isRecord(value)) return undefined
+  if (!Array.isArray(value.samples)) return undefined
+  if (!Number.isFinite(value.durationMs)) return undefined
+
+  const samples: MotionData['samples'] = []
+  for (const sample of value.samples) {
+    if (!isRecord(sample)) return undefined
+    if (!Number.isFinite(sample.tMs) || !Number.isFinite(sample.value)) return undefined
+    samples.push({ tMs: sample.tMs as number, value: sample.value as number })
+  }
+
+  return { samples, durationMs: value.durationMs as number }
+}
+
+function parseSourceLabel(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
 }
 
 function coerceName(value: unknown): string {

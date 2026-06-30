@@ -1,11 +1,18 @@
 import type { Preset } from '../storage/presets'
 
+interface FactoryEntry {
+  name: string
+  sourceHint: string
+}
+
 interface PresetControlsProps {
   presets: Preset[]
+  factory: ReadonlyArray<FactoryEntry>
   name: string
   onNameChange: (name: string) => void
   onSave: () => void
   onLoad: (name: string) => void
+  onLoadFactory: (name: string) => void
   onDelete: (name: string) => void
 }
 
@@ -13,18 +20,36 @@ interface PresetControlsProps {
 // Presentational: all storage I/O lives in App so this stays easy to reason about.
 export function PresetControls({
   presets,
+  factory,
   name,
   onNameChange,
   onSave,
   onLoad,
+  onLoadFactory,
   onDelete,
 }: PresetControlsProps) {
   return (
     <section className="preset-controls">
       <div className="panel-heading">
         <span>Presets</span>
-        <span>local · saved in this browser</span>
+        <span>factory + your own</span>
       </div>
+      {factory.length > 0 && (
+        <ul className="preset-list preset-factory">
+          {factory.map((preset) => (
+            <li key={preset.name}>
+              <button
+                type="button"
+                className="preset-load"
+                title={`Good for: ${preset.sourceHint}`}
+                onClick={() => onLoadFactory(preset.name)}
+              >
+                {preset.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="preset-save">
         <input
           type="text"
