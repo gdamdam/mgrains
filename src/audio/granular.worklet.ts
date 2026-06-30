@@ -70,7 +70,7 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
           this.core.clearSource()
           break
         case 'set-notes':
-          this.core.setActiveNotes(message.offsets)
+          this.core.setActiveNotes(message.notes)
           break
         case 'reset':
           this.core.reset(message.seed)

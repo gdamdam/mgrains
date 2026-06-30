@@ -106,6 +106,7 @@ export class GranularCore {
   // Held note pitch offsets (semitones) for chromatic polyphony, capped to a
   // small voice count so a chord can never overrun the grain pool.
   private readonly activeNotes = new Float64Array(8)
+  private readonly activeVelocities = new Float64Array(8)
   private activeNoteCount = 0
 
   private readonly active: Uint8Array
@@ -506,30 +507,34 @@ export class GranularCore {
     return shouldSpawn ? 1 : 0
   }
 
-  // Set the held note offsets (semitones). Empty => grains spawn at the patch's
-  // base pitch (monophonic); otherwise each grain event spawns one grain per note.
-  setActiveNotes(offsets: number[]): void {
-    const count = Math.min(this.activeNotes.length, offsets.length)
+  // Set the held notes (semitone offset + 0..1 velocity). Empty => grains spawn
+  // at the patch's base pitch/level (monophonic); otherwise each grain event
+  // spawns one grain per note, transposed and scaled by that note's velocity.
+  setActiveNotes(notes: { offset: number; velocity: number }[]): void {
+    const count = Math.min(this.activeNotes.length, notes.length)
     for (let index = 0; index < count; index += 1) {
-      const value = offsets[index]
-      this.activeNotes[index] = Number.isFinite(value) ? value : 0
+      const note = notes[index]
+      this.activeNotes[index] = Number.isFinite(note.offset) ? note.offset : 0
+      this.activeVelocities[index] = Number.isFinite(note.velocity)
+        ? Math.min(1, Math.max(0, note.velocity))
+        : 1
     }
     this.activeNoteCount = count
   }
 
-  // Spawn one grain per held note (transposed by the note + extraSemitones), or
-  // a single grain at the base pitch when no notes are held.
+  // Spawn one grain per held note (transposed by note + extraSemitones, scaled by
+  // the note's velocity), or a single full-velocity grain at the base pitch.
   private spawnVoices(extraSemitones: number, forceReverse: boolean): void {
     if (this.activeNoteCount === 0) {
       this.spawnGrain(extraSemitones, forceReverse)
       return
     }
     for (let index = 0; index < this.activeNoteCount; index += 1) {
-      this.spawnGrain(extraSemitones + this.activeNotes[index], forceReverse)
+      this.spawnGrain(extraSemitones + this.activeNotes[index], forceReverse, this.activeVelocities[index])
     }
   }
 
-  private spawnGrain(pitchOffsetSemitones = 0, forceReverse = false): void {
+  private spawnGrain(pitchOffsetSemitones = 0, forceReverse = false, velocity = 1): void {
     const slot = this.findGrainSlot()
     const regionStart = Math.floor(this.patch.regionStart * (this.sourceLength - 1))
     const regionEnd = Math.max(regionStart + 2, Math.ceil(this.patch.regionEnd * this.sourceLength))
@@ -545,7 +550,7 @@ export class GranularCore {
     const pan = this.rng.nextBipolar() * this.patch.stereoSpread
     const durationFrames = Math.max(2, this.patch.grainSizeMs * 0.001 * this.sampleRate)
     const expectedOverlap = Math.max(1, this.patch.densityHz * durationFrames / this.sampleRate)
-    const normalizedGain = 1 / Math.sqrt(expectedOverlap)
+    const normalizedGain = velocity / Math.sqrt(expectedOverlap)
 
     this.active[slot] = 1
     this.sourcePosition[slot] = regionStart + positionInRegion * (regionLength - 1)

@@ -345,7 +345,7 @@ describe('GranularCore', () => {
     poly.setPatch({ ...DEFAULT_PATCH })
     mono.setSource(source, source)
     poly.setSource(source, source)
-    poly.setActiveNotes([0, 7])
+    poly.setActiveNotes([{ offset: 0, velocity: 1 }, { offset: 7, velocity: 1 }])
 
     const monoOut = render(mono)
     const polyOut = render(poly)

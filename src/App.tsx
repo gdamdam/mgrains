@@ -15,6 +15,7 @@ import { applyMacro } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
 import { MidiInput } from './instrument/midi'
 import { controlForKey, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
+import { VoiceAllocator } from './instrument/voiceAllocator'
 import { MotionRecorder } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import { AbletonLinkClient, initialLinkState, type LinkState } from './transport/abletonLink'
@@ -96,6 +97,7 @@ export default function App() {
   const [keysActive, setKeysActive] = useState(false)
   const octaveRef = useRef(0)
   const heldNotesRef = useRef<Map<string, number>>(new Map())
+  const voiceAllocatorRef = useRef(new VoiceAllocator(8))
   const presetStoreRef = useRef(new PresetStore())
   const [presets, setPresets] = useState<Preset[]>([])
   const [presetName, setPresetName] = useState('')
@@ -155,15 +157,21 @@ export default function App() {
   // so note keys never collide with other shortcuts.
   useEffect(() => {
     if (!keysActive) return
-    const held = heldNotesRef.current
-    const pushNotes = () => engineRef.current?.setNotes([...held.values()])
+    const alloc = voiceAllocatorRef.current
+    const codeToNote = heldNotesRef.current
+    const pushNotes = () => engineRef.current?.setNotes(
+      alloc.activeVoices().map((voice) => ({ offset: voice.note, velocity: voice.velocity })),
+    )
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return
       const { code } = event
       if (isNoteKey(code)) {
         event.preventDefault()
-        const semitone = keyToSemitone(code) ?? 0
-        held.set(code, octaveRef.current * 12 + semitone)
+        // Map by code so an octave change between press and release still releases
+        // the right note. Computer keys play at full velocity.
+        const note = octaveRef.current * 12 + (keyToSemitone(code) ?? 0)
+        codeToNote.set(code, note)
+        alloc.noteOn(note, 1)
         pushNotes()
         return
       }
@@ -182,14 +190,19 @@ export default function App() {
       }
     }
     const onKeyUp = (event: KeyboardEvent) => {
-      if (isNoteKey(event.code) && held.delete(event.code)) pushNotes()
+      const note = codeToNote.get(event.code)
+      if (note === undefined) return
+      codeToNote.delete(event.code)
+      alloc.noteOff(note)
+      pushNotes()
     }
-    // MIDI input plays the same held-note voices; middle C (60) maps to offset 0.
+    // MIDI plays the same allocator voices (8-voice steal); middle C (60) = offset 0,
+    // and note velocity scales each voice's level.
     const midi = new MidiInput((event) => {
       if (event.type === 'noteon') {
-        held.set(`midi-${event.note}`, event.note - 60)
+        alloc.noteOn(event.note - 60, event.velocity / 127)
         pushNotes()
-      } else if (event.type === 'noteoff' && held.delete(`midi-${event.note}`)) {
+      } else if (event.type === 'noteoff' && alloc.noteOff(event.note - 60) !== null) {
         pushNotes()
       }
     })
@@ -200,7 +213,8 @@ export default function App() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       midi.disable()
-      held.clear()
+      alloc.reset()
+      codeToNote.clear()
       engineRef.current?.setNotes([])
     }
   }, [keysActive])
