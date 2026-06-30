@@ -1,33 +1,38 @@
+<div align="center">
+
 # mgrains
 
-Capture a moment. Bloom it or break it.
+**A granular instrument — bloom any sound into clouds, or shatter it into rhythm.**
 
-`mgrains` is an in-progress browser granular instrument and live effect. The current repository contains the tested architectural foundation and first interactive vertical slice; the complete product specification is in [`docs/OPUS_BUILD_PROMPT.md`](./docs/OPUS_BUILD_PROMPT.md).
+[![version](https://img.shields.io/badge/version-1.0.0-6c8f3a)](./package.json)
+[![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
+[![tests](https://img.shields.io/badge/tests-252%20passing-2ea043)](#verification)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](./tsconfig.json)
+[![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)](https://vite.dev)
+[![Web Audio](https://img.shields.io/badge/Web%20Audio-AudioWorklet-ff6d00)](https://developer.mozilla.org/docs/Web/API/AudioWorklet)
+[![PWA](https://img.shields.io/badge/PWA-installable-5a0fc8)](#progressive-web-app)
 
-## Current milestone
+[**▶ Live app — mgrains.mpump.live**](https://mgrains.mpump.live)
 
-Implemented:
+</div>
 
-- Vite, React, strict TypeScript, ESLint, and Vitest scaffold;
-- canonical versioned grain-patch and engine-message contracts;
-- deterministic fixed-pool granular DSP core;
-- AudioWorklet wrapper with coarse telemetry;
-- permission-aware microphone, physical line-input, or USB-interface capture;
-- 20-second stereo circular buffer with wrap-safe chronological reads, Clear, and Freeze;
-- preserved imported sample state when switching between Sample and Live;
-- generated stereo demo source and waveform peaks;
-- browser file decoding with size/duration limits;
-- distinct Bloom free-running and Shatter sample-frame schedulers;
-- Shatter BPM plus straight/dotted/triplet divisions and a 16-step gate/probability/pitch/reverse/ratchet editor;
-- interactive waveform position, XY surface, and direct Grain Size, Density, Position, and Spray controls;
-- real active-grain read-head markers over the waveform, driven by bounded 30 Hz worklet telemetry;
-- responsive, keyboard-readable, reduced-motion-aware foundation UI;
-- production-only service-worker registration and an offline-shell web manifest;
-- clean timeout/error behavior when browser audio output cannot start.
+---
 
-This is deliberately not presented as the complete v1. Physical-device audio QA, macros, advanced controls, mutation/history, motion recording, persistence, recording, MIDI, and full offline/update QA remain to be built.
+`mgrains` is a browser-native granular synthesizer and live effect. Feed it a generated source, an imported file, or a live capture, then perform it in one of two modes — **Bloom** (slow overlapping clouds) or **Shatter** (sample-accurate tempo-synced fragments) — through an XY surface, four performance macros, an eleven-slot effects rack, and a chromatic keyboard. All audio runs in an `AudioWorklet`; the UI never schedules grains.
 
-See [`docs/HANDOFF.md`](./docs/HANDOFF.md) for verified status and continuation order, and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the real-time boundary.
+## Highlights
+
+- **Two modes, one muscle memory** — Bloom and Shatter share the layout but run distinct schedulers, constraints, macros, and graphics, switching through a click-free 180 ms fade-through-silence.
+- **Direct grain controls** — Grain Size, Density/Rate, Position, and Spray always on the main surface; region, timing jitter, scan speed, pitch, pitch spread, reverse probability, stereo spread, window, and output in an Advanced panel — all with units.
+- **Four macros per mode** — Bloom: Cloud · Drift · Warmth · Space. Shatter: Chop · Scatter · Crush · Repeat. Each sweeps a curated parameter group; **Link/Unlink** keeps hand edits authoritative.
+- **11-effect rack** — Drive, Crush, Damp, Tape, Ring, Formant, Comb, Wow, Sub, Space (reverb), Repeat (tempo delay) — each a tile with an amount ring, opening a modal with its parameters and an SVG response curve. A stereo-linked master **limiter** is the final stage.
+- **Sources** — three deterministic demo sounds (random pick), audio-file import, and a 20-second live rolling buffer with **Freeze** and **Clear**.
+- **Performance** — large XY surface, draggable waveform position, a one-lane **motion recorder** (record / play / clear), and seeded **Mutate** with bounded **Undo**.
+- **Play it** — polyphonic chromatic playing from the computer keyboard (Ableton layout) and **Web MIDI** (note on/off + velocity), up to 8 voices with oldest-note stealing.
+- **Shatter sequencer** — BPM, straight/dotted/triplet divisions, and a deterministic 16-step lane (gate, probability, pitch offset, reverse, ratchet).
+- **Presets & sync** — 10 curated factory presets plus user presets in IndexedDB (versioned, motion + source-label aware, with a relink prompt); optional **Ableton Link** tempo sync via the companion **mpump** link-bridge.
+- **PWA** — installable manifest and a network-first service worker (offline shell, deploy-safe updates).
 
 ## Run locally
 
@@ -36,55 +41,136 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite and choose **Start audio**. Browser audio requires a user gesture. Use headphones before enabling **Live input**.
+Open the URL Vite prints and click **Start audio** (browser audio requires a user gesture). **Use headphones before enabling Live input** to avoid feedback.
+
+## Scripts
+
+| Script | Purpose |
+| --- | --- |
+| `npm run dev` | Vite dev server with HMR |
+| `npm run build` | Type-check (`tsc -b`) and production build |
+| `npm run preview` | Serve the production build locally |
+| `npm run lint` | ESLint |
+| `npm run test` | Vitest (run once) |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run typecheck` | Type-check without emit |
+| `npm run check` | **lint + test + build** (the full gate) |
+
+## Controls
+
+**Mouse / touch / pen** — drag the waveform to set Position; drag the XY surface for Position × Spray; all knobs have keyboard-accessible slider alternatives.
+
+**Computer keyboard** (when **Play keys** is on — other shortcuts are suppressed to avoid collisions):
+
+| Keys | Action |
+| --- | --- |
+| `A S D F G H J K L ;` | white notes (chromatic, polyphonic) |
+| `W E T Y U O P` | black notes |
+| `Z` / `X` | octave down / up |
+| `C` / `V` | output level down / up |
+
+**MIDI** — any connected device plays the same voices; note velocity scales each voice's level. MIDI is an optional enhancement; the app is fully usable without it.
+
+## Architecture
+
+```text
+main thread                         audio thread (AudioWorklet)
+───────────                         ───────────────────────────
+App.tsx ── patch/notes ──▶ AudioEngine ── postMessage ──▶ granular.worklet.ts
+  │  (sanitized GrainPatch,            (AudioContext graph,        │
+  │   {offset,velocity} voices)         live-input buffer)         ▼
+  ◀────────── telemetry (~30 Hz) ─────────────────────────  GranularCore (pure DSP)
+                                                              · fixed 64-grain pool
+                                                              · seeded RNG (deterministic)
+                                                              · per-sample param smoothing
+                                                              · FX chain → master limiter
+```
+
+- **The worklet owns all scheduling.** There is no UI-timer grain scheduling.
+- **`GranularCore`** is framework-free, deterministic (seeded `XorShift32`), and allocation-conscious (effects expose an allocation-free `processInto`).
+- **Parameter ownership:** grain-local values are captured at grain birth; continuous values (output, FX amounts) are one-pole smoothed; mode changes fade through true silence.
 
 ## Verification
 
 ```bash
-npm run lint
-npm run test
-npm run build
+npm run check   # lint + 252 tests + production build
 ```
 
-Or run all three:
+Tests are deterministic and live next to the code (DSP core, effects, contracts, schedulers, RNG, windows, presets, instrument, transport). Note: Vitest runs in a Node environment, so React components and live audio are covered by manual QA below, not unit tests.
 
-```bash
-npm run check
-```
+## Permissions & privacy
 
-## GitHub Pages
+- **Microphone / line input** is requested only when you enable **Live input**, and degrades gracefully if denied.
+- **Web MIDI** is requested only when you turn on **Play keys**, and is optional.
+- Everything is local: presets and any data live in your browser's IndexedDB. No accounts, no network, no telemetry.
 
-Pushes to `main` are verified, built with the `/mgrains/` base path, and deployed by GitHub Actions. The published app is available at [gdamdam.github.io/mgrains](https://gdamdam.github.io/mgrains/).
+## Browser notes & limitations
 
-In the repository's **Settings → Pages**, keep **Source** set to **GitHub Actions**. The deployment workflow can also be started manually from the Actions tab.
+- `AudioWorklet` needs a secure context in production (`localhost` is fine for dev).
+- The engine uses the real `AudioContext.sampleRate` and never assumes 44.1/48 kHz.
+- Headless/automated browsers may expose no audio device; the app times out with an actionable error instead of hanging.
+- A PWA install does **not** provide background or lock-screen audio.
+- Ableton Link sync requires the companion **mpump link-bridge** running locally (`ws://localhost:19876`); without it the Link panel simply shows "searching".
+
+## Physical-device QA checklist
+
+Automated tests cover the DSP and logic; the following must be checked by ear on real hardware before a release:
+
+- [ ] Audible stereo playback in Chrome, Safari, and Firefox (headphones/controlled output)
+- [ ] All four direct controls (Grain Size, Density, Position, Spray) respond cleanly
+- [ ] Bloom ↔ Shatter switch is click-free; both modes are audibly distinct
+- [ ] Each macro (Cloud/Drift/Warmth/Space, Chop/Scatter/Crush/Repeat) sweeps musically
+- [ ] Each FX (Drive…Repeat) engages without artefacts; master limiter holds the ceiling
+- [ ] Polyphonic chords from the computer keyboard and from a MIDI controller (with velocity)
+- [ ] Live input: built-in mic, physical line-in, USB interface; permission denial; Freeze; Clear; device disconnect; no runaway feedback
+- [ ] Motion record → play → clear behaves and stays in sync
+- [ ] Presets: save, reload, delete; factory presets load; relink prompt on source mismatch
+- [ ] Ableton Link locks tempo with the mpump bridge + another peer
+- [ ] Mobile Safari / Android: layout usable, audio starts, no thermal/stability surprises
+- [ ] `prefers-reduced-motion`: flying particles replaced by stable markers
+- [ ] Offline: loads after first successful visit (service worker)
 
 ## Repository map
 
 ```text
 src/
+  App.tsx                       integrated UI + performance wiring
   audio/
-    contracts.ts             canonical patch/messages and bounds
-    AudioEngine.ts           browser audio graph lifecycle
-    granular.worklet.ts      real-time worklet adapter
-    demoSource.ts            original deterministic source + peaks
+    contracts.ts                canonical GrainPatch, ranges, messages, sanitize
+    AudioEngine.ts              AudioContext graph + worklet lifecycle
+    granular.worklet.ts         real-time worklet adapter
+    demoSource.ts               three deterministic demo sources + peaks
+    macros.ts                   macro → parameter mappings + Link model
+    mutate.ts                   seeded deterministic patch variation
+    factoryPresets.ts           10 curated factory presets
     dsp/
-      GranularCore.ts        framework-independent grain engine
-      rng.ts                 seeded deterministic random source
-      windows.ts             grain envelopes
-  components/                waveform, XY, and parameter controls
-  App.tsx                    current integrated vertical slice
-docs/
-  ARCHITECTURE.md
-  HANDOFF.md
+      GranularCore.ts           grain engine + FX chain + master limiter
+      rng.ts, windows.ts        seeded RNG, grain envelopes
+      shatterTiming.ts          tempo/division → sample frames
+      StereoCircularBuffer.ts   live rolling buffer
+      effects.ts                drive, bitcrush, sample-rate reduce, one-pole, delay line
+      reverb.ts tempoDelay.ts tape.ts formant.ts ringMod.ts comb.ts wow.ts sub.ts limiter.ts
+  instrument/
+    qwertyKeymap.ts             Ableton computer-keyboard layout
+    voiceAllocator.ts           8-voice allocation with oldest-steal
+    midi.ts                     Web MIDI parsing + input wrapper
+  performance/motion.ts         deterministic one-lane motion recorder
+  storage/presets.ts            versioned preset serialize/migrate + IndexedDB store
+  transport/abletonLink.ts      Ableton Link bridge WebSocket client
+  components/                   waveform, XY pad, parameter/macro/preset controls
+    fx/                         FX bar, modal, SVG curves, FX rack
+public/                         manifest, service worker, app icon, CNAME
+.github/workflows/              GitHub Pages deploy
 ```
 
-## Browser notes
+## Progressive Web App
 
-- AudioWorklet requires a secure context in production; localhost is accepted for development.
-- The app uses the actual `AudioContext.sampleRate` and does not assume 44.1 or 48 kHz.
-- Live microphone/line input is optional and permission-aware; Web MIDI remains a future optional enhancement.
-- Automated/headless browser environments may expose no audio output. The app times out with an actionable error rather than remaining stuck in a starting state.
+`public/manifest.webmanifest` + `public/sw.js` make `mgrains` installable. The service worker is **network-first for navigations** (so a deploy never serves a stale shell) and cache-first for hashed assets, giving an offline shell after the first successful load.
+
+## Deployment
+
+Pushes to `main` are deployed by GitHub Actions (`.github/workflows/deploy-pages.yml`) to GitHub Pages, served at the custom domain **[mgrains.mpump.live](https://mgrains.mpump.live)**. Because it's a root-domain deploy, the build is **root-relative** (no base-path override) and `public/CNAME` pins the domain across deploys. The workflow self-enables Pages (`configure-pages` with `enablement: true`); set **Settings → Pages → Source** to **GitHub Actions** if prompted.
 
 ## License
 
-[GNU Affero General Public License v3.0 or later](./LICENSE). The generated demo source is produced by repository code and does not include third-party audio.
+[GNU Affero General Public License v3.0 or later](./LICENSE). All factory sources are generated by repository code — no third-party audio is bundled.
