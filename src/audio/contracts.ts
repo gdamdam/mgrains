@@ -144,11 +144,6 @@ export const ADVANCED_PARAM_KEYS = [
   'stereoSpread',
   'window',
   'outputGain',
-  'drive',
-  'crush',
-  'damp',
-  'space',
-  'repeat',
 ] as const satisfies ReadonlyArray<keyof GrainPatch>
 
 export interface EngineTelemetry {

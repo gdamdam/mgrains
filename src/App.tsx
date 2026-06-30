@@ -18,6 +18,7 @@ import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import { AbletonLinkClient, initialLinkState, type LinkState } from './transport/abletonLink'
 import { AdvancedControls } from './components/AdvancedControls'
 import { MacroControls } from './components/MacroControls'
+import { FxRack } from './components/fx/FxRack'
 import { ParameterControl } from './components/ParameterControl'
 import { PresetControls } from './components/PresetControls'
 import { ShatterSequencer } from './components/ShatterSequencer'
@@ -709,6 +710,8 @@ export default function App() {
         onChange={setMacro}
         onToggleLink={toggleMacroLink}
       />
+
+      <FxRack patch={patch} onChange={updatePatch} />
 
       <AdvancedControls patch={patch} onChange={updatePatch} onReset={resetAdvanced} />
 
