@@ -36,14 +36,17 @@ self.addEventListener('install', (event) => {
 })
 
 self.addEventListener('activate', (event) => {
+  // Keep claim() inside waitUntil so the browser can't terminate the worker
+  // before old caches are purged and clients are claimed.
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
-      keys
-        .filter((key) => key !== SHELL_CACHE && key !== RUNTIME_CACHE)
-        .map((key) => caches.delete(key)),
-    )),
+    caches.keys()
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => key !== SHELL_CACHE && key !== RUNTIME_CACHE)
+          .map((key) => caches.delete(key)),
+      ))
+      .then(() => self.clients.claim()),
   )
-  self.clients.claim()
 })
 
 // Drop the oldest entries until the cache is within budget. cache.keys() returns
@@ -70,8 +73,10 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => {
           if (response.ok) {
+            // Attach the cache refresh to the event so it isn't cut short if the
+            // worker is stopped right after the response is delivered.
             const copy = response.clone()
-            void caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy))
+            event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy)))
           }
           return response
         })
@@ -89,10 +94,14 @@ self.addEventListener('fetch', (event) => {
       if (cached) return cached
       return fetch(request).then((response) => {
         if (response.ok) {
+          // waitUntil keeps the put + trim alive past respondWith so the cache
+          // bound is actually enforced even if the worker is about to stop.
           const copy = response.clone()
-          void caches.open(RUNTIME_CACHE)
-            .then((cache) => cache.put(request, copy))
-            .then(() => trimCache(RUNTIME_CACHE, RUNTIME_MAX_ENTRIES))
+          event.waitUntil(
+            caches.open(RUNTIME_CACHE)
+              .then((cache) => cache.put(request, copy))
+              .then(() => trimCache(RUNTIME_CACHE, RUNTIME_MAX_ENTRIES)),
+          )
         }
         return response
       })

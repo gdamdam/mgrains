@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { AudioEngine, type AudioEngineState } from './audio/AudioEngine'
 import {
   DEFAULT_PATCH,
@@ -29,6 +29,17 @@ import { Waveform } from './components/Waveform'
 import { Wordmark } from './components/Wordmark'
 import { XYPad } from './components/XYPad'
 import './styles.css'
+
+// Memoized patch-editing panels. Telemetry updates several top-level states ~30 Hz;
+// without these, the whole tree re-renders on every tick. These panels depend only
+// on `patch` + stable callbacks (not telemetry), so memo lets them skip telemetry
+// renders entirely — the largest mobile-perf win. (Waveform/meter intentionally
+// still update, since they ARE the telemetry-driven UI.)
+const FxRackMemo = memo(FxRack)
+const AdvancedControlsMemo = memo(AdvancedControls)
+const MacroControlsMemo = memo(MacroControls)
+const XYPadMemo = memo(XYPad)
+const ShatterSequencerMemo = memo(ShatterSequencer)
 
 // Wall-clock millis for preset timestamps. Kept at module scope so the call site
 // inside event handlers does not trip the react-hooks purity rule.
@@ -77,6 +88,10 @@ export default function App() {
   // clicks); the ref blocks re-entry, the state disables the button.
   const [liveInputPending, setLiveInputPending] = useState(false)
   const liveInputPendingRef = useRef(false)
+  // Generation tokens so a slower async load that resolves after a newer one is
+  // discarded instead of clobbering the current selection (file decode / preset).
+  const fileLoadGenerationRef = useRef(0)
+  const presetLoadGenerationRef = useRef(0)
   const [activeGrains, setActiveGrains] = useState(0)
   const [peak, setPeak] = useState(0)
   const [currentShatterStep, setCurrentShatterStep] = useState(0)
@@ -210,13 +225,16 @@ export default function App() {
     // MIDI plays the same allocator voices (8-voice steal); middle C (60) = offset 0,
     // and note velocity scales each voice's level.
     const midi = new MidiInput((event) => {
-      // Owner per MIDI channel so the same pitch held on different channels/devices
-      // (or on the computer keyboard) stays independent and releases correctly.
+      // Owner per device + channel so the same pitch from different controllers,
+      // channels, or the computer keyboard stays independent and releases correctly.
       if (event.type === 'noteon') {
-        alloc.noteOn(event.note - 60, event.velocity / 127, `midi:${event.channel}`)
+        alloc.noteOn(event.note - 60, event.velocity / 127, `midi:${event.device}:${event.channel}`)
         pushNotes()
-      } else if (event.type === 'noteoff' && alloc.noteOff(event.note - 60, `midi:${event.channel}`) !== null) {
-        pushNotes()
+      } else if (event.type === 'noteoff') {
+        if (alloc.noteOff(event.note - 60, `midi:${event.device}:${event.channel}`) !== null) pushNotes()
+      } else if (event.type === 'disconnect') {
+        // Unplugged device: release every voice it still holds so notes don't stick.
+        if (alloc.releaseOwnerPrefix(`midi:${event.device}:`)) pushNotes()
       }
     })
     // Release every held QWERTY/MIDI voice and tell the engine to play nothing.
@@ -259,21 +277,32 @@ export default function App() {
     setPatchState(next)
   }
 
-  const updatePatch = (changes: Partial<GrainPatch>) => {
+  // Stable across renders (functional setState + refs only) so the memoized
+  // panels below skip re-rendering on every ~30 Hz telemetry tick.
+  const updatePatch = useCallback((changes: Partial<GrainPatch>) => {
     setPatchState((current) => {
       const next = sanitizePatch({ ...current, ...changes })
       engineRef.current?.setPatch(next)
       return next
     })
-  }
+  }, [])
 
-  const resetAdvanced = () => {
+  // Stable callbacks for the memoized XY pad / shatter sequencer (avoid inline
+  // arrows in JSX, which would defeat memoization).
+  const handleXYChange = useCallback((position: number, spray: number) => {
+    updatePatch({ position, spray })
+  }, [updatePatch])
+  const handleShatterStepsChange = useCallback((shatterSteps: GrainPatch['shatterSteps']) => {
+    updatePatch({ shatterSteps })
+  }, [updatePatch])
+
+  const resetAdvanced = useCallback(() => {
     setPatchState((current) => {
       const next = resetAdvancedToDefault(current)
       engineRef.current?.setPatch(next)
       return next
     })
-  }
+  }, [])
 
   const mutate = () => {
     const seed = mutationSeedRef.current
@@ -291,16 +320,16 @@ export default function App() {
     applyPatch(previous)
   }
 
-  const setMacro = (id: string, value: number) => {
+  const setMacro = useCallback((id: string, value: number) => {
     setMacroValues((previous) => ({ ...previous, [id]: value }))
     if (linkedMacros[id] !== false) {
       updatePatch(applyMacro(patch, id, value))
     }
-  }
+  }, [linkedMacros, patch, updatePatch])
 
-  const toggleMacroLink = (id: string) => {
+  const toggleMacroLink = useCallback((id: string) => {
     setLinkedMacros((previous) => ({ ...previous, [id]: previous[id] === false }))
-  }
+  }, [])
 
   const refreshPresets = () => {
     presetStoreRef.current.list().then(setPresets).catch(() => { /* storage unavailable */ })
@@ -331,9 +360,11 @@ export default function App() {
   }
 
   const loadPreset = (name: string) => {
+    const generation = (presetLoadGenerationRef.current += 1)
     presetStoreRef.current.load(name)
       .then((preset) => {
-        if (!preset) return
+        // Ignore a stale load that resolved after a newer preset was requested.
+        if (!preset || generation !== presetLoadGenerationRef.current) return
         applyPatch(preset.patch)
         applyPresetMotion(preset.motion)
         if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
@@ -474,12 +505,16 @@ export default function App() {
   const loadFile = async (file: File | undefined) => {
     if (!file) return
     setError(null)
+    const generation = (fileLoadGenerationRef.current += 1)
     try {
       const engine = engineRef.current
       if (!engine || engineState !== 'running') {
         throw new Error('Start audio before loading a file.')
       }
       const source = await engine.decodeFile(file)
+      // A newer file selection started while this one was decoding — drop this
+      // (now stale) result so a slow decode can't replace the newer choice.
+      if (generation !== fileLoadGenerationRef.current) return
       engine.setSource(source)
       setPeaks(source.peaks)
       setSourceLabel(source.label)
@@ -743,20 +778,20 @@ export default function App() {
               </select>
             </label>
           </div>
-          <ShatterSequencer
+          <ShatterSequencerMemo
             steps={patch.shatterSteps}
             currentStep={currentShatterStep}
-            onChange={(shatterSteps) => updatePatch({ shatterSteps })}
+            onChange={handleShatterStepsChange}
           />
         </section>
       )}
 
       <section className="performance-grid">
-        <XYPad
+        <XYPadMemo
           mode={patch.mode}
           x={patch.position}
           y={patch.spray}
-          onChange={(position, spray) => updatePatch({ position, spray })}
+          onChange={handleXYChange}
         />
 
         <div className="direct-controls">
@@ -817,7 +852,7 @@ export default function App() {
         </div>
       </section>
 
-      <MacroControls
+      <MacroControlsMemo
         mode={patch.mode}
         values={macroValues}
         linked={linkedMacros}
@@ -825,9 +860,9 @@ export default function App() {
         onToggleLink={toggleMacroLink}
       />
 
-      <FxRack patch={patch} onChange={updatePatch} />
+      <FxRackMemo patch={patch} onChange={updatePatch} />
 
-      <AdvancedControls patch={patch} onChange={updatePatch} onReset={resetAdvanced} />
+      <AdvancedControlsMemo patch={patch} onChange={updatePatch} onReset={resetAdvanced} />
 
       <PresetControls
         presets={presets}

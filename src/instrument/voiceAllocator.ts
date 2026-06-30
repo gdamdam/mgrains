@@ -98,6 +98,22 @@ export class VoiceAllocator {
     return index
   }
 
+  /**
+   * Frees every active voice whose owner starts with `prefix` — e.g. all voices
+   * held by a disconnected MIDI device (`midi:<id>:`). Returns true if any voice
+   * was freed, so callers know whether to refresh downstream note state.
+   */
+  releaseOwnerPrefix(prefix: string): boolean {
+    let released = false
+    for (const slot of this.slots) {
+      if (slot.active && slot.owner.startsWith(prefix)) {
+        slot.active = false
+        released = true
+      }
+    }
+    return released
+  }
+
   /** Snapshot of all sounding voices, ordered by ascending age (oldest first). */
   activeVoices(): ReadonlyArray<ActiveVoice> {
     return this.slots

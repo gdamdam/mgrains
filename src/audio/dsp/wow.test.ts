@@ -54,12 +54,15 @@ describe('Wow', () => {
         const wow = new Wow(SR)
         wow.setParams({ rate, depth })
         const { left, right } = runSine(wow, 8000, 220)
-        for (let i = 0; i < left.length; i += 1) {
-          expect(Number.isFinite(left[i])).toBe(true)
-          expect(Number.isFinite(right[i])).toBe(true)
-          expect(Math.abs(left[i])).toBeLessThan(4)
-          expect(Math.abs(right[i])).toBeLessThan(4)
+        // Aggregate the per-sample checks into one assertion per signal: a
+        // per-sample expect() over 24 param combos was ~768k calls and pushed
+        // this test near Vitest's 5 s limit. The coverage is identical.
+        let bad = false
+        for (let i = 0; i < left.length && !bad; i += 1) {
+          bad = !Number.isFinite(left[i]) || !Number.isFinite(right[i])
+            || Math.abs(left[i]) >= 4 || Math.abs(right[i]) >= 4
         }
+        expect(bad, `rate=${rate} depth=${depth}`).toBe(false)
       }
     }
   })

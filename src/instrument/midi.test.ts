@@ -98,8 +98,9 @@ describe('parseMidiMessage', () => {
 type FakeMidiMessageListener = ((message: { data: Uint8Array }) => void) | null
 
 interface FakeMidiInput {
+  id: string
   type: 'input'
-  state: 'connected'
+  state: 'connected' | 'disconnected'
   onmidimessage: FakeMidiMessageListener
 }
 
@@ -116,8 +117,8 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function fakeInput(): FakeMidiInput {
-  return { type: 'input', state: 'connected', onmidimessage: null }
+function fakeInput(id = 'dev0'): FakeMidiInput {
+  return { id, type: 'input', state: 'connected', onmidimessage: null }
 }
 
 function fakeAccess(inputs: FakeMidiInput[]): FakeMidiAccess {
@@ -160,7 +161,7 @@ describe('MidiInput', () => {
     const m = new MidiInput(handler)
     await m.enable()
 
-    const inp = fakeInput()
+    const inp = fakeInput('dev-hot')
     access.onstatechange?.({ port: inp })
 
     send(inp, [0x90, 64, 90])
@@ -170,6 +171,7 @@ describe('MidiInput', () => {
       channel: 0,
       note: 64,
       velocity: 90,
+      device: 'dev-hot',
     })
   })
 
@@ -189,5 +191,30 @@ describe('MidiInput', () => {
     m.disable()
     send(input, [0x90, 62, 100])
     expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('D) tags messages with the device id and releases the device on disconnect', async () => {
+    const input = fakeInput('dev-x')
+    const access = fakeAccess([input])
+    vi.stubGlobal('navigator', { requestMIDIAccess: () => Promise.resolve(access) })
+
+    const handler = vi.fn()
+    const m = new MidiInput(handler)
+    await m.enable()
+
+    send(input, [0x90, 60, 100])
+    expect(handler).toHaveBeenCalledWith({
+      type: 'noteon', channel: 0, note: 60, velocity: 100, device: 'dev-x',
+    })
+
+    // Unplug: a stable port object flips to 'disconnected'.
+    input.state = 'disconnected'
+    access.onstatechange?.({ port: input })
+    expect(handler).toHaveBeenLastCalledWith({ type: 'disconnect', device: 'dev-x' })
+
+    // The detached device no longer forwards messages.
+    handler.mockClear()
+    send(input, [0x90, 62, 100])
+    expect(handler).toHaveBeenCalledTimes(0)
   })
 })

@@ -65,7 +65,15 @@ function hasMidiSupport(nav: Navigator): boolean {
   return typeof (nav as { requestMIDIAccess?: unknown }).requestMIDIAccess === 'function'
 }
 
-export type MidiEventHandler = (event: MidiEvent) => void
+// Events delivered by MidiInput: a parsed message tagged with the originating
+// device id (so the same pitch/channel from different controllers stays
+// independent), plus a synthetic 'disconnect' fired when a device is unplugged so
+// the caller can release any voices that device still holds.
+export type MidiInputEvent =
+  | (MidiEvent & { device: string })
+  | { type: 'disconnect'; device: string }
+
+export type MidiEventHandler = (event: MidiInputEvent) => void
 
 /**
  * Thin wrapper around Web MIDI input: requests access, parses incoming
@@ -112,8 +120,13 @@ export class MidiInput {
 
     access.onstatechange = (event: MIDIConnectionEvent): void => {
       const port = event.port
-      if (port && port.type === 'input' && port.state === 'connected') {
+      if (!port || port.type !== 'input') return
+      if (port.state === 'connected') {
         this.bindInput(port as MIDIInput)
+      } else if (port.state === 'disconnected') {
+        // Detach and tell the caller so it can release this device's held voices.
+        this.unbindInput(port as MIDIInput)
+        this.onEvent({ type: 'disconnect', device: port.id })
       }
     }
   }
@@ -134,8 +147,14 @@ export class MidiInput {
     input.onmidimessage = (message: MIDIMessageEvent): void => {
       if (!message.data) return
       const event = parseMidiMessage(message.data)
-      if (event) this.onEvent(event)
+      if (event) this.onEvent({ ...event, device: input.id })
     }
     this.ports.add(input)
+  }
+
+  // Detach an input and forget it (hot-unplug).
+  private unbindInput(input: MIDIInput): void {
+    input.onmidimessage = null
+    this.ports.delete(input)
   }
 }

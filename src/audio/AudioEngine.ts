@@ -22,6 +22,9 @@ export class AudioEngine {
   // from an earlier enableLiveInput() can detect it has been superseded and
   // discard its stream instead of attaching it as an orphan.
   private liveInputGeneration = 0
+  // In-flight start(), so concurrent callers coalesce onto one AudioContext
+  // instead of each creating their own before the worklet finishes loading.
+  private startPromise: Promise<'started' | 'resumed' | 'running'> | null = null
   private stateListener: ((state: AudioEngineState) => void) | null = null
   private telemetryListener: ((telemetry: EngineTelemetry) => void) | null = null
   private liveInputEndedListener: (() => void) | null = null
@@ -58,7 +61,14 @@ export class AudioEngine {
   // resume apart from a fresh start: 'resumed' must NOT replace the current
   // source (a loaded file / frozen capture would be lost), whereas 'started'
   // (first init) and 'running' (an explicit reload while already running) may.
-  async start(): Promise<'started' | 'resumed' | 'running'> {
+  // Concurrent calls share one in-flight promise so the worklet/context is only
+  // built once.
+  start(): Promise<'started' | 'resumed' | 'running'> {
+    this.startPromise ??= this.runStart().finally(() => { this.startPromise = null })
+    return this.startPromise
+  }
+
+  private async runStart(): Promise<'started' | 'resumed' | 'running'> {
     // A user-triggered Start must recover both a suspended context and a Safari
     // "interrupted" one (e.g. after a phone call) — the latter also maps to the
     // suspended UI state, so resuming only literal "suspended" left it stuck.

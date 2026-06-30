@@ -121,4 +121,20 @@ describe('VoiceAllocator', () => {
     expect(alloc.noteOn(60, 0.5, 'kbd')).toBe(kbd)
     expect(alloc.activeVoices()).toHaveLength(2)
   })
+
+  it('releaseOwnerPrefix frees only the matching owners', () => {
+    const alloc = new VoiceAllocator(8)
+    alloc.noteOn(60, 1, 'midi:dev-a:0')
+    alloc.noteOn(64, 1, 'midi:dev-a:1') // same device, different channel
+    alloc.noteOn(67, 1, 'midi:dev-b:0')
+    alloc.noteOn(72, 1, 'kbd')
+
+    expect(alloc.releaseOwnerPrefix('midi:dev-a:')).toBe(true)
+    const remaining = alloc.activeVoices().map((voice) => voice.note).sort((a, b) => a - b)
+    expect(remaining).toEqual([67, 72]) // dev-b and kbd untouched
+
+    // No match → returns false and frees nothing.
+    expect(alloc.releaseOwnerPrefix('midi:dev-a:')).toBe(false)
+    expect(alloc.activeVoices()).toHaveLength(2)
+  })
 })
