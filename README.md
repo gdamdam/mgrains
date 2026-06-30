@@ -13,8 +13,6 @@
 [![Web Audio](https://img.shields.io/badge/Web%20Audio-AudioWorklet-ff6d00)](https://developer.mozilla.org/docs/Web/API/AudioWorklet)
 [![PWA](https://img.shields.io/badge/PWA-installable-5a0fc8)](#progressive-web-app)
 
-[**▶ Live app — mgrains.mpump.live**](https://mgrains.mpump.live)
-
 ![mgrains — granular instrument](./mgrains_screenshot.gif)
 
 </div>

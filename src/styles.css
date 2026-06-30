@@ -89,10 +89,11 @@ h1 {
 }
 
 h2 {
-  font-size: clamp(1.8rem, 4vw, 3rem);
-  font-weight: 400;
-  line-height: 0.95;
-  letter-spacing: -0.05em;
+  /* Kept below the ~26px dot-matrix logo so the wordmark stays the largest type. */
+  font-size: clamp(1rem, 2.2vw, 1.3rem);
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
 }
 
 .brand {
