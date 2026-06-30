@@ -18,6 +18,10 @@ export class AudioEngine {
   private liveInputNode: MediaStreamAudioSourceNode | null = null
   private liveTrack: MediaStreamTrack | null = null
   private liveTrackEndedHandler: (() => void) | null = null
+  // Bumped on every live-input teardown so a getUserMedia() call still pending
+  // from an earlier enableLiveInput() can detect it has been superseded and
+  // discard its stream instead of attaching it as an orphan.
+  private liveInputGeneration = 0
   private stateListener: ((state: AudioEngineState) => void) | null = null
   private telemetryListener: ((telemetry: EngineTelemetry) => void) | null = null
   private liveInputEndedListener: (() => void) | null = null
@@ -50,7 +54,11 @@ export class AudioEngine {
     }
   }
 
-  async start(): Promise<void> {
+  // Returns how the engine reached a running state so the caller can tell a
+  // resume apart from a fresh start: 'resumed' must NOT replace the current
+  // source (a loaded file / frozen capture would be lost), whereas 'started'
+  // (first init) and 'running' (an explicit reload while already running) may.
+  async start(): Promise<'started' | 'resumed' | 'running'> {
     // A user-triggered Start must recover both a suspended context and a Safari
     // "interrupted" one (e.g. after a phone call) — the latter also maps to the
     // suspended UI state, so resuming only literal "suspended" left it stuck.
@@ -58,9 +66,9 @@ export class AudioEngine {
       && (this.context.state === 'suspended' || this.context.state === 'interrupted')) {
       await this.context.resume()
       this.emitState('running')
-      return
+      return 'resumed'
     }
-    if (this.context && this.node) return
+    if (this.context && this.node) return 'running'
 
     this.emitState('starting')
     const context = new AudioContext({ latencyHint: 'interactive' })
@@ -105,6 +113,7 @@ export class AudioEngine {
       this.limiter = limiter
       context.onstatechange = () => this.emitState(this.mapContextState(context.state))
       this.emitState(this.mapContextState(context.state))
+      return 'started'
     } catch (error) {
       await context.close()
       this.context = null
@@ -141,6 +150,9 @@ export class AudioEngine {
     }
 
     this.stopLiveInput()
+    // Capture the generation AFTER tearing down: any later teardown (re-entry,
+    // source switch, close) bumps it, marking this request stale on resolve.
+    const generation = this.liveInputGeneration
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
@@ -149,6 +161,13 @@ export class AudioEngine {
         channelCount: { ideal: 2 },
       },
     })
+    // Superseded while getUserMedia() was pending (rapid clicks, a source switch,
+    // or shutdown): stop the just-acquired stream and bail without attaching it,
+    // so we never leave an orphaned mic stream wired into the worklet.
+    if (generation !== this.liveInputGeneration || !this.context || !this.node) {
+      stream.getTracks().forEach((streamTrack) => streamTrack.stop())
+      throw new DOMException('Live input request was superseded.', 'AbortError')
+    }
     const track = stream.getAudioTracks()[0]
     if (!track) {
       stream.getTracks().forEach((streamTrack) => streamTrack.stop())
@@ -233,6 +252,9 @@ export class AudioEngine {
   }
 
   private stopLiveInput(): void {
+    // Invalidate any in-flight enableLiveInput(): its pending getUserMedia()
+    // result is now stale and must be discarded rather than attached.
+    this.liveInputGeneration += 1
     // Detach the disconnect handler first so the track.stop() below — an
     // intentional shutdown — is never reported as an unexpected disconnect.
     if (this.liveTrack && this.liveTrackEndedHandler) {

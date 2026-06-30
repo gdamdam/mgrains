@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { parseMidiMessage } from './midi'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MidiInput, parseMidiMessage } from './midi'
 
 describe('parseMidiMessage', () => {
   it('parses note on', () => {
@@ -89,5 +89,105 @@ describe('parseMidiMessage', () => {
   it('returns null for unrecognized status', () => {
     expect(parseMidiMessage([0xf0, 1, 2])).toBeNull()
     expect(parseMidiMessage([0x00, 1, 2])).toBeNull()
+  })
+})
+
+// Test doubles for the Web MIDI API — only the surface `MidiInput` actually
+// touches, typed minimally (no `any`). They are passed across the stubbed
+// `navigator` boundary, where `MidiInput` treats them as the real DOM types.
+type FakeMidiMessageListener = ((message: { data: Uint8Array }) => void) | null
+
+interface FakeMidiInput {
+  type: 'input'
+  state: 'connected'
+  onmidimessage: FakeMidiMessageListener
+}
+
+interface FakeMidiAccess {
+  inputs: Map<string, FakeMidiInput>
+  onstatechange: ((event: { port: FakeMidiInput }) => void) | null
+}
+
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  const promise = new Promise<T>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+function fakeInput(): FakeMidiInput {
+  return { type: 'input', state: 'connected', onmidimessage: null }
+}
+
+function fakeAccess(inputs: FakeMidiInput[]): FakeMidiAccess {
+  return { inputs: new Map(inputs.map((input, n) => [String(n), input])), onstatechange: null }
+}
+
+function send(input: FakeMidiInput, bytes: number[]): void {
+  input.onmidimessage?.({ data: new Uint8Array(bytes) })
+}
+
+describe('MidiInput', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('A) does not attach handlers if disabled while access is pending', async () => {
+    const d = deferred<FakeMidiAccess>()
+    vi.stubGlobal('navigator', { requestMIDIAccess: () => d.promise })
+
+    const handler = vi.fn()
+    const m = new MidiInput(handler)
+    const input = fakeInput()
+
+    const p = m.enable()
+    m.disable()
+    d.resolve(fakeAccess([input]))
+    await p
+
+    send(input, [0x90, 60, 100])
+    expect(handler).toHaveBeenCalledTimes(0)
+  })
+
+  it('B) binds devices connected after enable (hot-plug)', async () => {
+    const access = fakeAccess([])
+    vi.stubGlobal('navigator', {
+      requestMIDIAccess: () => Promise.resolve(access),
+    })
+
+    const handler = vi.fn()
+    const m = new MidiInput(handler)
+    await m.enable()
+
+    const inp = fakeInput()
+    access.onstatechange?.({ port: inp })
+
+    send(inp, [0x90, 64, 90])
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledWith({
+      type: 'noteon',
+      channel: 0,
+      note: 64,
+      velocity: 90,
+    })
+  })
+
+  it('C) forwards messages while enabled and stops after disable', async () => {
+    const input = fakeInput()
+    vi.stubGlobal('navigator', {
+      requestMIDIAccess: () => Promise.resolve(fakeAccess([input])),
+    })
+
+    const handler = vi.fn()
+    const m = new MidiInput(handler)
+    await m.enable()
+
+    send(input, [0x90, 60, 100])
+    expect(handler).toHaveBeenCalledTimes(1)
+
+    m.disable()
+    send(input, [0x90, 62, 100])
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 })

@@ -74,34 +74,68 @@ export type MidiEventHandler = (event: MidiEvent) => void
 export class MidiInput {
   private access: MIDIAccess | null = null
   private readonly ports = new Set<MIDIInput>()
+  // Tracks the caller's intent independently of the async access request, so a
+  // `disable()` (or re-entrant `enable()`) during a pending request can cancel
+  // it and prevent handler leaks once the promise finally resolves.
+  private active = false
 
   constructor(private readonly onEvent: MidiEventHandler) {}
 
   async enable(): Promise<void> {
-    if (this.access) return
+    // Already enabled or a request is in flight; nothing more to do.
+    if (this.active) return
 
+    // Throw before flipping `active` so a failed support check leaves us off.
     if (typeof navigator === 'undefined' || !hasMidiSupport(navigator)) {
       throw new Error('Web MIDI is not supported in this environment')
     }
 
-    const access = await navigator.requestMIDIAccess()
+    this.active = true
+
+    let access: MIDIAccess
+    try {
+      access = await navigator.requestMIDIAccess()
+    } catch (err) {
+      this.active = false
+      throw err
+    }
+
+    // Disabled while the request was pending: drop the access without wiring
+    // anything so no handlers leak past the user turning MIDI off.
+    if (!this.active) return
+
     this.access = access
 
     access.inputs.forEach((input) => {
-      input.onmidimessage = (message: MIDIMessageEvent): void => {
-        if (!message.data) return
-        const event = parseMidiMessage(message.data)
-        if (event) this.onEvent(event)
-      }
-      this.ports.add(input)
+      this.bindInput(input)
     })
+
+    access.onstatechange = (event: MIDIConnectionEvent): void => {
+      const port = event.port
+      if (port && port.type === 'input' && port.state === 'connected') {
+        this.bindInput(port as MIDIInput)
+      }
+    }
   }
 
   disable(): void {
+    this.active = false
+    if (this.access) this.access.onstatechange = null
     for (const input of this.ports) {
       input.onmidimessage = null
     }
     this.ports.clear()
     this.access = null
+  }
+
+  // Attach the message handler to an input and track it. Idempotent: binding an
+  // already-tracked input simply refreshes its handler.
+  private bindInput(input: MIDIInput): void {
+    input.onmidimessage = (message: MIDIMessageEvent): void => {
+      if (!message.data) return
+      const event = parseMidiMessage(message.data)
+      if (event) this.onEvent(event)
+    }
+    this.ports.add(input)
   }
 }

@@ -24,6 +24,10 @@ interface VoiceSlot {
   velocity: number
   age: number
   active: boolean
+  // Identifies the input that owns this voice (e.g. 'kbd' vs 'midi'). Lets the
+  // same pitch from different sources occupy independent voices so releasing
+  // one input never silences a note still held by another.
+  owner: string
 }
 
 export class VoiceAllocator {
@@ -41,6 +45,7 @@ export class VoiceAllocator {
       velocity: 0,
       age: 0,
       active: false,
+      owner: '',
     }))
   }
 
@@ -50,12 +55,13 @@ export class VoiceAllocator {
    * - Otherwise a free voice is used if available.
    * - If all voices are busy, the oldest-started voice is stolen.
    */
-  noteOn(note: number, velocity = 1): number {
+  noteOn(note: number, velocity = 1, owner = ''): number {
     const age = this.clock++
 
-    // Retrigger an already-sounding note on its existing voice.
+    // Retrigger an already-sounding note on its existing voice. The owner must
+    // match too, so the same pitch from a different source gets its own voice.
     const existing = this.slots.findIndex(
-      (slot) => slot.active && slot.note === note,
+      (slot) => slot.active && slot.note === note && slot.owner === owner,
     )
     if (existing !== -1) {
       const slot = this.slots[existing]
@@ -73,6 +79,7 @@ export class VoiceAllocator {
     slot.velocity = velocity
     slot.age = age
     slot.active = true
+    slot.owner = owner
     return target
   }
 
@@ -80,9 +87,9 @@ export class VoiceAllocator {
    * Frees the voice sounding the given note.
    * Returns the freed voice index, or null when the note is not active.
    */
-  noteOff(note: number): number | null {
+  noteOff(note: number, owner = ''): number | null {
     const index = this.slots.findIndex(
-      (slot) => slot.active && slot.note === note,
+      (slot) => slot.active && slot.note === note && slot.owner === owner,
     )
     if (index === -1) {
       return null
@@ -112,6 +119,7 @@ export class VoiceAllocator {
       slot.note = -1
       slot.velocity = 0
       slot.age = 0
+      slot.owner = ''
     }
   }
 

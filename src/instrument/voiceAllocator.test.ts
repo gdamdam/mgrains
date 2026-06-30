@@ -81,4 +81,44 @@ describe('VoiceAllocator', () => {
     const ages = alloc.activeVoices().map((voice) => voice.age)
     expect(ages[0]).toBeLessThan(ages[1])
   })
+
+  it('gives the same note from two owners independent voices', () => {
+    const alloc = new VoiceAllocator(4)
+    alloc.noteOn(60, 1, 'kbd')
+    alloc.noteOn(60, 1, 'midi')
+
+    expect(alloc.activeVoices()).toHaveLength(2)
+  })
+
+  it('releasing one owner leaves the other owner still sounding the note', () => {
+    const alloc = new VoiceAllocator(4)
+    alloc.noteOn(60, 1, 'kbd')
+    alloc.noteOn(60, 1, 'midi')
+
+    alloc.noteOff(60, 'kbd')
+
+    const active = alloc.activeVoices()
+    expect(active).toHaveLength(1)
+    expect(active[0].note).toBe(60)
+  })
+
+  it('noteOff from a non-owning source returns null and frees nothing', () => {
+    const alloc = new VoiceAllocator(4)
+    alloc.noteOn(60, 1, 'kbd')
+
+    expect(alloc.noteOff(60, 'midi')).toBeNull()
+    expect(alloc.activeVoices()).toHaveLength(1)
+  })
+
+  it('retrigger only affects the same owner', () => {
+    const alloc = new VoiceAllocator(4)
+    const kbd = alloc.noteOn(60, 1, 'kbd')
+    const midi = alloc.noteOn(60, 1, 'midi')
+
+    expect(midi).not.toBe(kbd)
+
+    // Retriggering 'kbd' reuses the kbd voice, not the midi one.
+    expect(alloc.noteOn(60, 0.5, 'kbd')).toBe(kbd)
+    expect(alloc.activeVoices()).toHaveLength(2)
+  })
 })

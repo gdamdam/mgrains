@@ -1,10 +1,15 @@
-// Bump this whenever the caching strategy changes; activate() purges older caches.
-const CACHE_NAME = 'mgrains-shell-v4'
+// Bump these whenever the caching strategy changes; activate() purges older caches.
+const SHELL_CACHE = 'mgrains-shell-v5'
+// Runtime cache is size-capped: hashed bundles from past deploys would otherwise
+// accumulate here forever (sw.js never changes between deploys, so the cache name
+// alone can't evict them). Trimming to a fixed budget bounds disk usage.
+const RUNTIME_CACHE = 'mgrains-runtime-v5'
+const RUNTIME_MAX_ENTRIES = 64
 const APP_BASE = new URL('./', self.location.href).pathname
 const SHELL_URLS = [APP_BASE, `${APP_BASE}manifest.webmanifest`, `${APP_BASE}mgrains-mark.svg`]
 
 async function precache() {
-  const cache = await caches.open(CACHE_NAME)
+  const cache = await caches.open(SHELL_CACHE)
   await cache.addAll(SHELL_URLS)
   // Precache the content-hashed build assets (JS/CSS/worklet) listed in the
   // generated manifest. The SW activates after the first visit's assets have
@@ -33,18 +38,23 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => Promise.all(
-      keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)),
+      keys
+        .filter((key) => key !== SHELL_CACHE && key !== RUNTIME_CACHE)
+        .map((key) => caches.delete(key)),
     )),
   )
   self.clients.claim()
 })
 
-function cacheResponse(request, response) {
-  if (response.ok) {
-    const copy = response.clone()
-    void caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+// Drop the oldest entries until the cache is within budget. cache.keys() returns
+// requests in insertion order, so the front of the list is the least recently
+// added — delete from there.
+async function trimCache(cacheName, maxEntries) {
+  const cache = await caches.open(cacheName)
+  const keys = await cache.keys()
+  for (let i = 0; i < keys.length - maxEntries; i += 1) {
+    await cache.delete(keys[i])
   }
-  return response
 }
 
 self.addEventListener('fetch', (event) => {
@@ -58,14 +68,34 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then((response) => cacheResponse(request, response))
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone()
+            void caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy))
+          }
+          return response
+        })
         .catch(() => caches.match(request).then((cached) => cached ?? caches.match(APP_BASE))),
     )
     return
   }
 
   // Cache-first for everything else: built assets are content-hashed and immutable.
+  // Check the precache (shell) first, then the runtime cache; on a network fetch,
+  // store into the runtime cache and trim it back to RUNTIME_MAX_ENTRIES so past
+  // releases' obsolete bundles can't grow it without bound.
   event.respondWith(
-    caches.match(request).then((cached) => cached ?? fetch(request).then((response) => cacheResponse(request, response))),
+    caches.match(request).then((cached) => {
+      if (cached) return cached
+      return fetch(request).then((response) => {
+        if (response.ok) {
+          const copy = response.clone()
+          void caches.open(RUNTIME_CACHE)
+            .then((cache) => cache.put(request, copy))
+            .then(() => trimCache(RUNTIME_CACHE, RUNTIME_MAX_ENTRIES))
+        }
+        return response
+      })
+    }),
   )
 })

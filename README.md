@@ -4,9 +4,9 @@
 
 **A granular instrument — bloom any sound into clouds, or shatter it into rhythm.**
 
-[![version](https://img.shields.io/badge/version-1.1.1-6c8f3a)](./package.json)
+[![version](https://img.shields.io/badge/version-1.1.2-6c8f3a)](./package.json)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
-[![tests](https://img.shields.io/badge/tests-285%20passing-2ea043)](#verification)
+[![tests](https://img.shields.io/badge/tests-292%20passing-2ea043)](#verification)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](./tsconfig.json)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)](https://vite.dev)
@@ -93,7 +93,7 @@ App.tsx ── patch/notes ──▶ AudioEngine ── postMessage ──▶ gr
 ## Verification
 
 ```bash
-npm run check   # lint + 252 tests + production build
+npm run check   # lint + 292 tests + production build
 ```
 
 Tests are deterministic and live next to the code (DSP core, effects, contracts, schedulers, RNG, windows, presets, instrument, transport). Note: Vitest runs in a Node environment, so React components and live audio are covered by manual QA below, not unit tests.

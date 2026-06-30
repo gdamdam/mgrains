@@ -16,7 +16,7 @@ import { mutatePatch } from './audio/mutate'
 import { MidiInput } from './instrument/midi'
 import { controlForKey, isEditableTarget, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
 import { VoiceAllocator } from './instrument/voiceAllocator'
-import { MotionRecorder, resolvePresetMotion } from './performance/motion'
+import { MotionRecorder, resolvePresetMotion, type MotionData } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import { AbletonLinkClient, initialLinkState, type LinkState } from './transport/abletonLink'
 import { AdvancedControls } from './components/AdvancedControls'
@@ -73,6 +73,10 @@ export default function App() {
   const [sourceMode, setSourceMode] = useState<AudioSourceMode>('sample')
   const [frozen, setFrozen] = useState(false)
   const [liveBufferSeconds, setLiveBufferSeconds] = useState(0)
+  // Guards against firing a second getUserMedia() while one is in flight (rapid
+  // clicks); the ref blocks re-entry, the state disables the button.
+  const [liveInputPending, setLiveInputPending] = useState(false)
+  const liveInputPendingRef = useRef(false)
   const [activeGrains, setActiveGrains] = useState(0)
   const [peak, setPeak] = useState(0)
   const [currentShatterStep, setCurrentShatterStep] = useState(0)
@@ -176,7 +180,9 @@ export default function App() {
         // the right note. Computer keys play at full velocity.
         const note = octaveRef.current * 12 + (keyToSemitone(code) ?? 0)
         codeToNote.set(code, note)
-        alloc.noteOn(note, 1)
+        // Owner 'kbd' keeps the computer keyboard's voices independent of MIDI, so
+        // releasing a key never silences the same pitch held on a MIDI device.
+        alloc.noteOn(note, 1, 'kbd')
         pushNotes()
         return
       }
@@ -198,16 +204,18 @@ export default function App() {
       const note = codeToNote.get(event.code)
       if (note === undefined) return
       codeToNote.delete(event.code)
-      alloc.noteOff(note)
+      alloc.noteOff(note, 'kbd')
       pushNotes()
     }
     // MIDI plays the same allocator voices (8-voice steal); middle C (60) = offset 0,
     // and note velocity scales each voice's level.
     const midi = new MidiInput((event) => {
+      // Owner per MIDI channel so the same pitch held on different channels/devices
+      // (or on the computer keyboard) stays independent and releases correctly.
       if (event.type === 'noteon') {
-        alloc.noteOn(event.note - 60, event.velocity / 127)
+        alloc.noteOn(event.note - 60, event.velocity / 127, `midi:${event.channel}`)
         pushNotes()
-      } else if (event.type === 'noteoff' && alloc.noteOff(event.note - 60) !== null) {
+      } else if (event.type === 'noteoff' && alloc.noteOff(event.note - 60, `midi:${event.channel}`) !== null) {
         pushNotes()
       }
     })
@@ -309,20 +317,25 @@ export default function App() {
       .catch(() => setError('Could not save preset — local storage is unavailable.'))
   }
 
+  // Reset the motion lane when loading any preset (user OR factory): stop active
+  // playback first, then swap in the preset's recording if it has one, otherwise
+  // clear the recording/duration/hasMotion/playback so stale automation can't
+  // immediately overwrite the just-loaded patch.
+  const applyPresetMotion = (motion?: MotionData) => {
+    cancelMotionLoop()
+    const resolved = resolvePresetMotion(motion)
+    motionRef.current = resolved.recorder
+    motionLoopRef.current = resolved.loopMs
+    setHasMotion(resolved.hasMotion)
+    setMotionState('idle')
+  }
+
   const loadPreset = (name: string) => {
     presetStoreRef.current.load(name)
       .then((preset) => {
         if (!preset) return
         applyPatch(preset.patch)
-        // Loading any preset first stops active motion playback, then replaces the
-        // lane wholesale: a preset with motion swaps in its recording; one without
-        // clears the recording, duration, hasMotion, and playback state.
-        cancelMotionLoop()
-        const motion = resolvePresetMotion(preset.motion)
-        motionRef.current = motion.recorder
-        motionLoopRef.current = motion.loopMs
-        setHasMotion(motion.hasMotion)
-        setMotionState('idle')
+        applyPresetMotion(preset.motion)
         if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
           setError(`Preset "${name}" was saved with source "${preset.sourceLabel}". Load that source to match its motion and position.`)
         }
@@ -334,6 +347,8 @@ export default function App() {
     const preset = FACTORY_PRESETS.find((entry) => entry.name === name)
     if (!preset) return
     applyPatch(sanitizePatch({ ...DEFAULT_PATCH, ...preset.patch }))
+    // Factory presets carry no motion, so this stops/clears any existing lane.
+    applyPresetMotion()
   }
 
   const deletePreset = (name: string) => {
@@ -438,7 +453,11 @@ export default function App() {
         setFrozen(true)
         setError('Live input device disconnected — the captured buffer is frozen. Press “Use sample” to switch back.')
       })
-      await engine.start()
+      const status = await engine.start()
+      // Resuming a suspended/interrupted context must keep the current source — a
+      // loaded file or frozen live capture — so only a fresh start or an explicit
+      // reload (already running) generates and loads the demo source.
+      if (status === 'resumed') return
       const source = createDemoSource(engine.sampleRate ?? 48_000)
       setPeaks(source.peaks)
       setSourceLabel(source.label)
@@ -481,6 +500,9 @@ export default function App() {
   }
 
   const startLiveInput = async () => {
+    if (liveInputPendingRef.current) return
+    liveInputPendingRef.current = true
+    setLiveInputPending(true)
     setError(null)
     try {
       const engine = engineRef.current
@@ -496,12 +518,18 @@ export default function App() {
       setSourceLabel(`Live input${channels}`)
       updatePatch({ position: 0.92, regionStart: 0, regionEnd: 1, scanSpeed: 0 })
     } catch (caught) {
+      // The request was superseded (a newer enable / source switch / shutdown
+      // raced this one): not a user-facing error, just drop it.
+      if (caught instanceof DOMException && caught.name === 'AbortError') return
       const message = caught instanceof DOMException && caught.name === 'NotAllowedError'
         ? 'Live input permission was denied. Allow microphone access and try again.'
         : caught instanceof Error
           ? caught.message
           : 'Live input could not be enabled.'
       setError(message)
+    } finally {
+      liveInputPendingRef.current = false
+      setLiveInputPending(false)
     }
   }
 
@@ -552,14 +580,14 @@ export default function App() {
           <button
             className="file-button"
             type="button"
-            disabled={engineState !== 'running'}
+            disabled={engineState !== 'running' || liveInputPending}
             aria-pressed={sourceMode === 'live'}
             onClick={() => {
               if (sourceMode === 'live') returnToSample()
               else void startLiveInput()
             }}
           >
-            {sourceMode === 'live' ? 'Use sample' : 'Live input'}
+            {sourceMode === 'live' ? 'Use sample' : liveInputPending ? 'Enabling…' : 'Live input'}
           </button>
           <button
             className={`file-button ${frozen ? 'is-active' : ''}`}
