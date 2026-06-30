@@ -512,7 +512,6 @@ export default function App() {
 
       <section className="intro-row">
         <div>
-          <p className="eyebrow">Capture a moment.</p>
           <h2>{MODE_COPY[patch.mode].title} it.</h2>
           <p>{MODE_COPY[patch.mode].detail}</p>
         </div>
