@@ -14,13 +14,19 @@ import { applyMacro } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
 import { controlForKey, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
 import { MotionRecorder } from './performance/motion'
+import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import { AdvancedControls } from './components/AdvancedControls'
 import { MacroControls } from './components/MacroControls'
 import { ParameterControl } from './components/ParameterControl'
+import { PresetControls } from './components/PresetControls'
 import { ShatterSequencer } from './components/ShatterSequencer'
 import { Waveform } from './components/Waveform'
 import { XYPad } from './components/XYPad'
 import './styles.css'
+
+// Wall-clock millis for preset timestamps. Kept at module scope so the call site
+// inside event handlers does not trip the react-hooks purity rule.
+const epochMs = (): number => Date.now()
 
 const MODE_COPY: Record<GrainMode, { title: string; detail: string }> = {
   bloom: {
@@ -85,9 +91,21 @@ export default function App() {
   const [hasMotion, setHasMotion] = useState(false)
   const [keysActive, setKeysActive] = useState(false)
   const octaveRef = useRef(0)
+  const presetStoreRef = useRef(new PresetStore())
+  const [presets, setPresets] = useState<Preset[]>([])
+  const [presetName, setPresetName] = useState('')
 
   useEffect(() => () => {
     void engineRef.current?.close()
+  }, [])
+
+  // Load the saved preset list once on mount (IndexedDB may be unavailable).
+  useEffect(() => {
+    let cancelled = false
+    presetStoreRef.current.list()
+      .then((list) => { if (!cancelled) setPresets(list) })
+      .catch(() => { /* storage unavailable — presets stay empty */ })
+    return () => { cancelled = true }
   }, [])
 
   // Keep the latest position available to the rAF motion loop without re-subscribing.
@@ -189,6 +207,30 @@ export default function App() {
 
   const toggleMacroLink = (id: string) => {
     setLinkedMacros((previous) => ({ ...previous, [id]: previous[id] === false }))
+  }
+
+  const refreshPresets = () => {
+    presetStoreRef.current.list().then(setPresets).catch(() => { /* storage unavailable */ })
+  }
+
+  const savePreset = () => {
+    const name = presetName.trim() || 'Untitled'
+    presetStoreRef.current.save(serializePreset(name, patch, epochMs()))
+      .then(() => {
+        setPresetName('')
+        refreshPresets()
+      })
+      .catch(() => setError('Could not save preset — local storage is unavailable.'))
+  }
+
+  const loadPreset = (name: string) => {
+    presetStoreRef.current.load(name)
+      .then((preset) => { if (preset) applyPatch(preset.patch) })
+      .catch(() => setError('Could not load preset.'))
+  }
+
+  const deletePreset = (name: string) => {
+    presetStoreRef.current.delete(name).then(refreshPresets).catch(() => { /* ignore */ })
   }
 
   const cancelMotionLoop = () => {
@@ -611,6 +653,15 @@ export default function App() {
       />
 
       <AdvancedControls patch={patch} onChange={updatePatch} onReset={resetAdvanced} />
+
+      <PresetControls
+        presets={presets}
+        name={presetName}
+        onNameChange={setPresetName}
+        onSave={savePreset}
+        onLoad={loadPreset}
+        onDelete={deletePreset}
+      />
 
       <footer>
         <span>Source · {sourceLabel}{sourceMode === 'live' ? ` · ${frozen ? 'frozen' : 'rolling'}` : ''}</span>
