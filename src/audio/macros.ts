@@ -47,12 +47,18 @@ const SCATTER_PARAMS = [
   'timingJitter',
   'reverseProbability',
 ] as const satisfies ReadonlyArray<keyof GrainPatch>
+const WARMTH_PARAMS = ['damp', 'drive'] as const satisfies ReadonlyArray<keyof GrainPatch>
+const CRUSH_PARAMS = ['drive', 'crush', 'damp'] as const satisfies ReadonlyArray<
+  keyof GrainPatch
+>
 
 export const MACROS: ReadonlyArray<MacroDef> = Object.freeze([
   Object.freeze({ id: 'cloud', label: 'Cloud', mode: 'bloom', params: CLOUD_PARAMS }),
   Object.freeze({ id: 'drift', label: 'Drift', mode: 'bloom', params: DRIFT_PARAMS }),
+  Object.freeze({ id: 'warmth', label: 'Warmth', mode: 'bloom', params: WARMTH_PARAMS }),
   Object.freeze({ id: 'chop', label: 'Chop', mode: 'shatter', params: CHOP_PARAMS }),
   Object.freeze({ id: 'scatter', label: 'Scatter', mode: 'shatter', params: SCATTER_PARAMS }),
+  Object.freeze({ id: 'crush', label: 'Crush', mode: 'shatter', params: CRUSH_PARAMS }),
 ])
 
 // Params each macro controls, exposed so the UI can drive Link/Unlink: an
@@ -106,6 +112,20 @@ export function applyMacro(
         spray: lerp([0, 1], v),
         timingJitter: lerp([0, 1], v),
         reverseProbability: lerp([0, 0.85], v),
+      }
+    case 'warmth':
+      // Tone shaping: roll off the highs and add a gentle saturation glow.
+      return {
+        damp: lerp([0, 0.8], v),
+        drive: lerp([0, 0.4], v),
+      }
+    case 'crush':
+      // Aggressive degradation: hard drive + bit reduction, with a touch of
+      // damping to tame the harshest top end.
+      return {
+        drive: lerp([0, 1], v),
+        crush: lerp([0, 1], v),
+        damp: lerp([0, 0.5], v),
       }
     default:
       return {}

@@ -12,17 +12,19 @@ function inRange(value: number, range: readonly [number, number]): boolean {
 }
 
 describe('MACROS registry', () => {
-  it('contains exactly cloud, drift (bloom) and chop, scatter (shatter)', () => {
+  it('contains cloud, drift, warmth (bloom) and chop, scatter, crush (shatter)', () => {
     const ids = MACROS.map((macro) => macro.id).sort()
-    expect(ids).toEqual(['chop', 'cloud', 'drift', 'scatter'])
+    expect(ids).toEqual(['chop', 'cloud', 'crush', 'drift', 'scatter', 'warmth'])
   })
 
   it('tags each macro with the mode it belongs to', () => {
     const byId = new Map(MACROS.map((macro) => [macro.id, macro.mode]))
     expect(byId.get('cloud')).toBe('bloom')
     expect(byId.get('drift')).toBe('bloom')
+    expect(byId.get('warmth')).toBe('bloom')
     expect(byId.get('chop')).toBe('shatter')
     expect(byId.get('scatter')).toBe('shatter')
+    expect(byId.get('crush')).toBe('shatter')
   })
 
   it('keeps MACRO_PARAMS keys aligned with the registry', () => {
@@ -133,6 +135,33 @@ describe('applyMacro: scatter', () => {
     expect((high.reverseProbability as number)).toBeGreaterThan(
       low.reverseProbability as number,
     )
+  })
+})
+
+describe('applyMacro: warmth', () => {
+  it('grows damp and drive with value, staying in range', () => {
+    const low = applyMacro(DEFAULT_PATCH, 'warmth', 0)
+    const high = applyMacro(DEFAULT_PATCH, 'warmth', 1)
+    expect((high.damp as number)).toBeGreaterThan(low.damp as number)
+    expect((high.drive as number)).toBeGreaterThan(low.drive as number)
+    for (const result of [low, high]) {
+      expect(inRange(result.damp as number, PATCH_RANGES.damp)).toBe(true)
+      expect(inRange(result.drive as number, PATCH_RANGES.drive)).toBe(true)
+    }
+  })
+})
+
+describe('applyMacro: crush', () => {
+  it('grows drive and crush with value, staying in range', () => {
+    const low = applyMacro(DEFAULT_PATCH, 'crush', 0)
+    const high = applyMacro(DEFAULT_PATCH, 'crush', 1)
+    expect((high.drive as number)).toBeGreaterThan(low.drive as number)
+    expect((high.crush as number)).toBeGreaterThan(low.crush as number)
+    for (const result of [low, high]) {
+      expect(inRange(result.drive as number, PATCH_RANGES.drive)).toBe(true)
+      expect(inRange(result.crush as number, PATCH_RANGES.crush)).toBe(true)
+      expect(inRange(result.damp as number, PATCH_RANGES.damp)).toBe(true)
+    }
   })
 })
 

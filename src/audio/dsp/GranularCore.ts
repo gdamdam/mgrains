@@ -5,6 +5,7 @@ import {
   type GrainPatch,
   type GrainWindow,
 } from '../contracts'
+import { bitcrush, OnePole, softClipDrive } from './effects'
 import { XorShift32 } from './rng'
 import { shatterStepFrames } from './shatterTiming'
 import { grainWindow } from './windows'
@@ -24,6 +25,11 @@ export interface ProcessResult {
 const DEFAULT_MAX_GRAINS = 64
 const MODE_TRANSITION_HALF_SECONDS = 0.09
 const OUTPUT_SMOOTHING_SECONDS = 0.02
+// Below this smoothed amount an effect is bypassed entirely, so a patch with the
+// FX at zero renders a bit-identical dry signal.
+const FX_EPSILON = 1e-4
+// Darkest lowpass the damping macro reaches (normalized cutoff), keeping some body.
+const DAMP_MIN_CUTOFF = 0.04
 
 type ModeTransitionState = 'steady' | 'fade-out' | 'fade-in'
 
@@ -49,6 +55,14 @@ export class GranularCore {
   private smoothedOutputGain = DEFAULT_PATCH.outputGain
   private targetOutputGain = DEFAULT_PATCH.outputGain
   private readonly outputSmoothingCoefficient: number
+  private smoothedDrive = 0
+  private targetDrive = 0
+  private smoothedCrush = 0
+  private targetCrush = 0
+  private smoothedDamp = 0
+  private targetDamp = 0
+  private readonly filterLeft = new OnePole()
+  private readonly filterRight = new OnePole()
 
   private readonly active: Uint8Array
   private readonly sourcePosition: Float64Array
@@ -146,6 +160,7 @@ export class GranularCore {
       this.modeTransitionGain = 1
       this.applyPatch(next, true)
       this.smoothedOutputGain = this.targetOutputGain
+      this.snapFxToTargets()
       return
     }
 
@@ -221,7 +236,34 @@ export class GranularCore {
     this.modeTransitionState = 'steady'
     this.modeTransitionGain = 1
     this.smoothedOutputGain = this.targetOutputGain
+    this.snapFxToTargets()
+    this.filterLeft.reset()
+    this.filterRight.reset()
     this.rng.reset(seed ?? this.patch.seed)
+  }
+
+  private snapFxToTargets(): void {
+    this.smoothedDrive = this.targetDrive
+    this.smoothedCrush = this.targetCrush
+    this.smoothedDamp = this.targetDamp
+  }
+
+  // Drive (saturation) -> crush (bit reduction) -> damp (lowpass tone), each
+  // bypassed below FX_EPSILON, then the existing soft limiter. Continuous params
+  // are smoothed per sample so macro/automation moves never click.
+  private applyFx(sample: number, filter: OnePole): number {
+    let value = sample
+    if (this.smoothedDrive > FX_EPSILON) {
+      value = softClipDrive(value, this.smoothedDrive)
+    }
+    if (this.smoothedCrush > FX_EPSILON) {
+      value = bitcrush(value, 16 - this.smoothedCrush * 14)
+    }
+    if (this.smoothedDamp > FX_EPSILON) {
+      filter.setCutoff(1 - this.smoothedDamp * (1 - DAMP_MIN_CUTOFF), 'lowpass')
+      value = filter.process(value)
+    }
+    return this.sanitizeSample(value)
   }
 
   process(outputLeft: Float32Array, outputRight: Float32Array): ProcessResult {
@@ -246,6 +288,9 @@ export class GranularCore {
       this.smoothedOutputGain += (
         this.targetOutputGain - this.smoothedOutputGain
       ) * this.outputSmoothingCoefficient
+      this.smoothedDrive += (this.targetDrive - this.smoothedDrive) * this.outputSmoothingCoefficient
+      this.smoothedCrush += (this.targetCrush - this.smoothedCrush) * this.outputSmoothingCoefficient
+      this.smoothedDamp += (this.targetDamp - this.smoothedDamp) * this.outputSmoothingCoefficient
 
       if (absoluteFrame >= this.nextGrainFrame) {
         if (this.patch.mode === 'shatter') {
@@ -300,8 +345,8 @@ export class GranularCore {
       }
 
       const masterGain = this.smoothedOutputGain * this.modeTransitionGain
-      left = this.sanitizeSample(left * masterGain)
-      right = this.sanitizeSample(right * masterGain)
+      left = this.applyFx(left * masterGain, this.filterLeft)
+      right = this.applyFx(right * masterGain, this.filterRight)
       outputLeft[offset] = left
       outputRight[offset] = right
       peak = Math.max(peak, Math.abs(left), Math.abs(right))
@@ -389,6 +434,9 @@ export class GranularCore {
     const previousSeed = previousPatch.seed
     this.patch = nextPatch
     this.targetOutputGain = nextPatch.outputGain
+    this.targetDrive = nextPatch.drive
+    this.targetCrush = nextPatch.crush
+    this.targetDamp = nextPatch.damp
     if (nextPatch.seed !== previousSeed) this.rng.reset(nextPatch.seed)
     if (
       forceResync
