@@ -14,9 +14,9 @@ import { FACTORY_PRESETS } from './audio/factoryPresets'
 import { applyMacro } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
 import { MidiInput } from './instrument/midi'
-import { controlForKey, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
+import { controlForKey, isEditableTarget, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
 import { VoiceAllocator } from './instrument/voiceAllocator'
-import { MotionRecorder } from './performance/motion'
+import { MotionRecorder, resolvePresetMotion } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import { AbletonLinkClient, initialLinkState, type LinkState } from './transport/abletonLink'
 import { AdvancedControls } from './components/AdvancedControls'
@@ -164,6 +164,10 @@ export default function App() {
     )
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return
+      // Don't capture keystrokes meant for a text field / select (e.g. the preset
+      // name box). Releases of already-held keys still flow through onKeyUp below,
+      // which is focus-agnostic, so notes started before the focus moved still stop.
+      if (isEditableTarget(event.target)) return
       const { code } = event
       if (isNoteKey(code)) {
         event.preventDefault()
@@ -206,16 +210,32 @@ export default function App() {
         pushNotes()
       }
     })
-    void midi.enable().catch(() => { /* Web MIDI unavailable or permission denied */ })
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
-      midi.disable()
+    // Release every held QWERTY/MIDI voice and tell the engine to play nothing.
+    // Shared by the blur/hidden handlers and the effect teardown so the release
+    // path is defined once.
+    const releaseAllVoices = () => {
       alloc.reset()
       codeToNote.clear()
       engineRef.current?.setNotes([])
+    }
+    // Losing the window (blur) or tab visibility drops keyup events, which would
+    // otherwise leave notes stuck on. Release everything when that happens.
+    const onBlur = () => releaseAllVoices()
+    const onVisibilityChange = () => {
+      if (document.hidden) releaseAllVoices()
+    }
+    void midi.enable().catch(() => { /* Web MIDI unavailable or permission denied */ })
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      midi.disable()
+      releaseAllVoices()
     }
   }, [keysActive])
 
@@ -293,13 +313,15 @@ export default function App() {
       .then((preset) => {
         if (!preset) return
         applyPatch(preset.patch)
-        if (preset.motion) {
-          cancelMotionLoop()
-          motionRef.current = MotionRecorder.deserialize(preset.motion)
-          motionLoopRef.current = preset.motion.durationMs
-          setMotionState('idle')
-          setHasMotion(preset.motion.durationMs > 0)
-        }
+        // Loading any preset first stops active motion playback, then replaces the
+        // lane wholesale: a preset with motion swaps in its recording; one without
+        // clears the recording, duration, hasMotion, and playback state.
+        cancelMotionLoop()
+        const motion = resolvePresetMotion(preset.motion)
+        motionRef.current = motion.recorder
+        motionLoopRef.current = motion.loopMs
+        setHasMotion(motion.hasMotion)
+        setMotionState('idle')
         if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
           setError(`Preset "${name}" was saved with source "${preset.sourceLabel}". Load that source to match its motion and position.`)
         }
@@ -408,6 +430,12 @@ export default function App() {
           positions: telemetry.grainPositions,
           intensities: telemetry.grainIntensities,
         })
+      })
+      engine.onLiveInputEnded(() => {
+        // The engine has already frozen the captured buffer; reflect that and tell
+        // the player why capture stopped (telemetry will keep the frozen state).
+        setFrozen(true)
+        setError('Live input device disconnected — the captured buffer is frozen. Press “Use sample” to switch back.')
       })
       await engine.start()
       const source = createDemoSource(engine.sampleRate ?? 48_000)

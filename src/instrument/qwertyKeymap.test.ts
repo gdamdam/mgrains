@@ -4,6 +4,7 @@ import {
   OCTAVE_KEYS,
   VELOCITY_KEYS,
   controlForKey,
+  isEditableTarget,
   isNoteKey,
   keyToSemitone,
 } from './qwertyKeymap'
@@ -61,5 +62,25 @@ describe('controlForKey', () => {
   it('exposes the control key constants', () => {
     expect(OCTAVE_KEYS).toEqual({ down: 'KeyZ', up: 'KeyX' })
     expect(VELOCITY_KEYS).toEqual({ down: 'KeyC', up: 'KeyV' })
+  })
+})
+
+describe('isEditableTarget', () => {
+  it('matches text/select form controls by tag name', () => {
+    expect(isEditableTarget({ tagName: 'INPUT' } as unknown as EventTarget)).toBe(true)
+    expect(isEditableTarget({ tagName: 'TEXTAREA' } as unknown as EventTarget)).toBe(true)
+    expect(isEditableTarget({ tagName: 'SELECT' } as unknown as EventTarget)).toBe(true)
+  })
+
+  it('matches contenteditable elements', () => {
+    expect(isEditableTarget(
+      { tagName: 'DIV', isContentEditable: true } as unknown as EventTarget,
+    )).toBe(true)
+  })
+
+  it('ignores non-editable elements and null', () => {
+    expect(isEditableTarget({ tagName: 'BUTTON' } as unknown as EventTarget)).toBe(false)
+    expect(isEditableTarget({ tagName: 'DIV', isContentEditable: false } as unknown as EventTarget)).toBe(false)
+    expect(isEditableTarget(null)).toBe(false)
   })
 })

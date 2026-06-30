@@ -99,3 +99,25 @@ export class MotionRecorder {
     return m
   }
 }
+
+// The motion-lane state a preset load should produce. Loading any preset replaces
+// the lane wholesale: a preset carrying a non-empty recording swaps it in; one
+// without (or with an empty recording) clears the lane so no stale automation
+// survives. `loopMs` is the playback loop length and `hasMotion` gates the UI's
+// motion transport.
+export interface PresetMotionState {
+  recorder: MotionRecorder
+  loopMs: number
+  hasMotion: boolean
+}
+
+export function resolvePresetMotion(motion: MotionData | undefined): PresetMotionState {
+  if (motion && motion.durationMs > 0) {
+    return {
+      recorder: MotionRecorder.deserialize(motion),
+      loopMs: motion.durationMs,
+      hasMotion: true,
+    }
+  }
+  return { recorder: new MotionRecorder(), loopMs: 0, hasMotion: false }
+}

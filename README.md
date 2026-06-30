@@ -4,7 +4,7 @@
 
 **A granular instrument — bloom any sound into clouds, or shatter it into rhythm.**
 
-[![version](https://img.shields.io/badge/version-1.0.0-6c8f3a)](./package.json)
+[![version](https://img.shields.io/badge/version-1.0.1-6c8f3a)](./package.json)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
 [![tests](https://img.shields.io/badge/tests-252%20passing-2ea043)](#verification)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](./tsconfig.json)
@@ -32,7 +32,7 @@
 - **Play it** — polyphonic chromatic playing from the computer keyboard (Ableton layout) and **Web MIDI** (note on/off + velocity), up to 8 voices with oldest-note stealing.
 - **Shatter sequencer** — BPM, straight/dotted/triplet divisions, and a deterministic 16-step lane (gate, probability, pitch offset, reverse, ratchet).
 - **Presets & sync** — 10 curated factory presets plus user presets in IndexedDB (versioned, motion + source-label aware, with a relink prompt); optional **Ableton Link** tempo sync via the companion **mpump** link-bridge.
-- **PWA** — installable manifest and a network-first service worker (offline shell, deploy-safe updates).
+- **PWA** — installable manifest and a network-first service worker that precaches the hashed app assets (full offline use after one visit, deploy-safe updates).
 
 ## Run locally
 
@@ -165,7 +165,7 @@ public/                         manifest, service worker, app icon, CNAME
 
 ## Progressive Web App
 
-`public/manifest.webmanifest` + `public/sw.js` make `mgrains` installable. The service worker is **network-first for navigations** (so a deploy never serves a stale shell) and cache-first for hashed assets, giving an offline shell after the first successful load.
+`public/manifest.webmanifest` + `public/sw.js` make `mgrains` installable. The service worker is **network-first for navigations** (so a deploy never serves a stale shell) and cache-first for hashed assets. At install it precaches the shell plus the content-hashed build assets listed in a generated `precache-manifest.json` (emitted by a small Vite plugin), so the full app — including the audio worklet — works offline after a single successful load.
 
 ## Deployment
 

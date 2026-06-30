@@ -355,6 +355,55 @@ describe('GranularCore', () => {
     expect(poly.activeGrainCount).toBeGreaterThanOrEqual(mono.activeGrainCount)
   })
 
+  it('responds promptly when Bloom density increases from a sparse setting', () => {
+    const source = makeSource()
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 8 })
+    const sparse = {
+      ...DEFAULT_PATCH,
+      mode: 'bloom' as const,
+      densityHz: 0.5, // one grain every 2 s (2000 frames @1 kHz)
+      grainSizeMs: 5,
+      timingJitter: 0,
+      spray: 0,
+      scanSpeed: 0,
+    }
+    core.setPatch(sparse)
+    core.setSource(source, source)
+
+    // First grain spawns at frame 0 and queues the next one ~2 s out.
+    core.process(new Float32Array(64), new Float32Array(64))
+
+    // Jump to dense: the next grain must arrive within roughly one new interval
+    // (1000 / 40 = 25 frames), not wait out the previously scheduled 2000-frame gap.
+    core.setPatch({ ...sparse, densityHz: 40 })
+    const spawned = countSpawned(core, 200)
+
+    // Without prompt rescheduling this stays 0 (next grain is ~2000 frames away).
+    expect(spawned).toBeGreaterThan(1)
+  })
+
+  it('does not double-trigger or reset phase on a density decrease', () => {
+    const source = makeSource()
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 8 })
+    const dense = {
+      ...DEFAULT_PATCH,
+      mode: 'bloom' as const,
+      densityHz: 40, // interval 25 frames
+      grainSizeMs: 5,
+      timingJitter: 0,
+      spray: 0,
+      scanSpeed: 0,
+    }
+    core.setPatch(dense)
+    core.setSource(source, source)
+    core.process(new Float32Array(10), new Float32Array(10))
+
+    // Lowering density must not pull the next grain earlier (no double-trigger):
+    // the grain already scheduled ~25 frames out stays put.
+    core.setPatch({ ...dense, densityHz: 0.5 })
+    expect(countSpawned(core, 20)).toBe(1)
+  })
+
   it('produces silence without a source', () => {
     const core = new GranularCore({ sampleRate: 48_000 })
     const left = new Float32Array(128).fill(1)

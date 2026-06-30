@@ -1,10 +1,32 @@
 // Bump this whenever the caching strategy changes; activate() purges older caches.
-const CACHE_NAME = 'mgrains-shell-v3'
+const CACHE_NAME = 'mgrains-shell-v4'
 const APP_BASE = new URL('./', self.location.href).pathname
 const SHELL_URLS = [APP_BASE, `${APP_BASE}manifest.webmanifest`, `${APP_BASE}mgrains-mark.svg`]
 
+async function precache() {
+  const cache = await caches.open(CACHE_NAME)
+  await cache.addAll(SHELL_URLS)
+  // Precache the content-hashed build assets (JS/CSS/worklet) listed in the
+  // generated manifest. The SW activates after the first visit's assets have
+  // already loaded, so without this they would not be cached until re-requested,
+  // leaving the first offline load broken. Best-effort: a missing manifest (dev
+  // build) or fetch failure still leaves the shell cached and assets fall back to
+  // the runtime cache-first handler below.
+  try {
+    const response = await fetch(`${APP_BASE}precache-manifest.json`, { cache: 'no-store' })
+    if (response.ok) {
+      const assets = await response.json()
+      if (Array.isArray(assets)) {
+        await cache.addAll(assets.map((path) => `${APP_BASE}${path}`))
+      }
+    }
+  } catch {
+    // Offline precache of hashed assets is best-effort; ignore failures.
+  }
+}
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS)))
+  event.waitUntil(precache())
   self.skipWaiting()
 })
 

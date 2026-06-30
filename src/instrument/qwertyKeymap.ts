@@ -55,6 +55,23 @@ export function isNoteKey(code: string): boolean {
   return Object.prototype.hasOwnProperty.call(KEY_TO_SEMITONE, code)
 }
 
+/**
+ * True when a keyboard event targets an editable control (text input, textarea,
+ * select, or contenteditable). The QWERTY instrument must not capture keystrokes
+ * destined for such controls — otherwise typing a preset name or picking a
+ * division would trigger notes and be swallowed by preventDefault. Duck-typed on
+ * `tagName`/`isContentEditable` so it stays unit-testable without a live DOM.
+ */
+export function isEditableTarget(target: EventTarget | null): boolean {
+  const element = target as (HTMLElement | null)
+  const tagName = element?.tagName
+  if (typeof tagName !== 'string') return false
+  return tagName === 'INPUT'
+    || tagName === 'TEXTAREA'
+    || tagName === 'SELECT'
+    || element?.isContentEditable === true
+}
+
 /** Maps a code to its octave/velocity control intent, or null. */
 export function controlForKey(code: string): ControlIntent | null {
   switch (code) {

@@ -664,6 +664,19 @@ export class GranularCore {
       || nextPatch.shatterDivision !== previousPatch.shatterDivision
     ) {
       this.resyncScheduler(schedulerFrame)
+    } else if (
+      nextPatch.densityHz !== previousPatch.densityHz
+      && nextPatch.mode !== 'shatter'
+    ) {
+      // A density increase shouldn't have to wait out a grain interval that was
+      // scheduled under the previous (sparser) setting — that can stall for
+      // seconds. Cap the next grain to at most one new interval away so denser
+      // settings respond promptly. Clamping the max only ever pulls the grain
+      // earlier on an increase (a decrease leaves the sooner grain untouched),
+      // so it never forces a double-trigger or resets grain/RNG phase.
+      const intervalFrames = Math.max(1, this.sampleRate / nextPatch.densityHz)
+      const earliestNext = schedulerFrame + intervalFrames
+      if (this.nextGrainFrame > earliestNext) this.nextGrainFrame = earliestNext
     }
   }
 

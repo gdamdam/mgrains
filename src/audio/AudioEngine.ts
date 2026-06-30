@@ -16,8 +16,11 @@ export class AudioEngine {
   private limiter: DynamicsCompressorNode | null = null
   private liveStream: MediaStream | null = null
   private liveInputNode: MediaStreamAudioSourceNode | null = null
+  private liveTrack: MediaStreamTrack | null = null
+  private liveTrackEndedHandler: (() => void) | null = null
   private stateListener: ((state: AudioEngineState) => void) | null = null
   private telemetryListener: ((telemetry: EngineTelemetry) => void) | null = null
+  private liveInputEndedListener: (() => void) | null = null
 
   get sampleRate(): number | null {
     return this.context?.sampleRate ?? null
@@ -37,8 +40,22 @@ export class AudioEngine {
     }
   }
 
+  // Fired when the live-input device ends unexpectedly (e.g. unplugged), after
+  // the engine has torn the input down and frozen the captured buffer. Lets the
+  // UI surface the change without the engine importing React.
+  onLiveInputEnded(listener: () => void): () => void {
+    this.liveInputEndedListener = listener
+    return () => {
+      if (this.liveInputEndedListener === listener) this.liveInputEndedListener = null
+    }
+  }
+
   async start(): Promise<void> {
-    if (this.context?.state === 'suspended') {
+    // A user-triggered Start must recover both a suspended context and a Safari
+    // "interrupted" one (e.g. after a phone call) — the latter also maps to the
+    // suspended UI state, so resuming only literal "suspended" left it stuck.
+    if (this.context
+      && (this.context.state === 'suspended' || this.context.state === 'interrupted')) {
       await this.context.resume()
       this.emitState('running')
       return
@@ -141,12 +158,17 @@ export class AudioEngine {
 
     const inputNode = this.context.createMediaStreamSource(stream)
     inputNode.connect(this.node)
-    track.addEventListener('ended', () => {
-      if (this.liveStream === stream) this.stopLiveInput()
-    }, { once: true })
+    // An "ended" event here means the device dropped out unexpectedly — calling
+    // track.stop() ourselves does not fire it. stopLiveInput() detaches this
+    // handler before any intentional teardown, so a source switch is never
+    // mistaken for a disconnect.
+    const onEnded = () => this.handleLiveInputDisconnect(stream)
+    track.addEventListener('ended', onEnded)
 
     this.liveStream = stream
     this.liveInputNode = inputNode
+    this.liveTrack = track
+    this.liveTrackEndedHandler = onEnded
     this.send({ type: 'clear-live-buffer' })
     this.send({ type: 'set-source-mode', mode: 'live' })
     this.send({ type: 'set-freeze', frozen: false })
@@ -211,10 +233,29 @@ export class AudioEngine {
   }
 
   private stopLiveInput(): void {
+    // Detach the disconnect handler first so the track.stop() below — an
+    // intentional shutdown — is never reported as an unexpected disconnect.
+    if (this.liveTrack && this.liveTrackEndedHandler) {
+      this.liveTrack.removeEventListener('ended', this.liveTrackEndedHandler)
+    }
+    this.liveTrack = null
+    this.liveTrackEndedHandler = null
     this.liveInputNode?.disconnect()
     this.liveStream?.getTracks().forEach((track) => track.stop())
     this.liveInputNode = null
     this.liveStream = null
+  }
+
+  // The live device ended unexpectedly. Tear the input down, then freeze the
+  // captured buffer so playback continues from the last live audio with an
+  // accurate (frozen) state instead of a dead "Capturing live input", and notify
+  // the UI. Ignored if this stream is no longer the active input (already torn
+  // down by an intentional source switch).
+  private handleLiveInputDisconnect(stream: MediaStream): void {
+    if (this.liveStream !== stream) return
+    this.stopLiveInput()
+    this.send({ type: 'set-freeze', frozen: true })
+    this.liveInputEndedListener?.()
   }
 
   private emitState(state: AudioEngineState): void {
