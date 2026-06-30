@@ -89,10 +89,21 @@ h1 {
 }
 
 h2 {
-  font-size: clamp(2.6rem, 8vw, 6.8rem);
+  font-size: clamp(1.8rem, 4vw, 3rem);
   font-weight: 400;
-  line-height: 0.92;
-  letter-spacing: -0.075em;
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.brand {
+  display: flex;
+  margin-bottom: 9px;
+  line-height: 0;
+}
+
+.wordmark {
+  display: block;
+  color: var(--text);
 }
 
 .eyebrow,
@@ -210,7 +221,7 @@ button.file-button:disabled {
 
 .intro-row {
   align-items: end;
-  padding: clamp(40px, 7vw, 88px) 0 34px;
+  padding: clamp(20px, 3vw, 36px) 0 24px;
 }
 
 .intro-row > div:first-child > p:last-child {

@@ -26,6 +26,7 @@ import { ParameterControl } from './components/ParameterControl'
 import { PresetControls } from './components/PresetControls'
 import { ShatterSequencer } from './components/ShatterSequencer'
 import { Waveform } from './components/Waveform'
+import { Wordmark } from './components/Wordmark'
 import { XYPad } from './components/XYPad'
 import './styles.css'
 
@@ -528,8 +529,8 @@ export default function App() {
     <main className={`app app--${patch.mode}`}>
       <header className="app-header">
         <div>
+          <h1 className="brand"><Wordmark height={26} /></h1>
           <p className="eyebrow">granular instrument · v{__APP_VERSION__}</p>
-          <h1>mgrains</h1>
         </div>
         <div className="engine-status" aria-live="polite">
           <span className={`status-dot status-dot--${engineState}`} />

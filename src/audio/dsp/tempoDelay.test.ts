@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { detectDiscontinuities, sineSource } from './artifactDetection'
 import { divisionToSeconds, TempoDelay } from './tempoDelay'
 
 const SR = 48000
@@ -165,6 +166,37 @@ describe('TempoDelay', () => {
       const outB = b.process(left, right)
       expect(outA[0]).toBe(outB[0])
       expect(outA[1]).toBe(outB[1])
+    }
+  })
+
+  it('crossfades the read head on a warm delay-time change (no click)', () => {
+    // A steady sine through a no-feedback delay yields a delayed sine (smooth).
+    // Changing the time jumps the integer read tap; here 0.02 s -> 0.005 s shifts
+    // the 300 Hz tap by ~half a period, i.e. nearly antiphase — a hard click
+    // without the read-head crossfade.
+    const delay = new TempoDelay(SR)
+    delay.setParams({ timeSeconds: 0.02, feedback: 0, tone: 0, width: 0 })
+    const sine = sineSource(SR, 300, SR, 0.8)
+    const wet = new Float32Array(sine.length)
+    const change = SR >> 1
+    for (let i = 0; i < change; i += 1) wet[i] = delay.process(sine[i], sine[i])[0]
+    delay.setParams({ timeSeconds: 0.005, feedback: 0, tone: 0, width: 0 })
+    for (let i = change; i < sine.length; i += 1) wet[i] = delay.process(sine[i], sine[i])[0]
+
+    expect(detectDiscontinuities(wet)).toHaveLength(0)
+  })
+
+  it('snaps (no crossfade) when the time is set on a cold line', () => {
+    // Cold instance: time set before any audio. Must match a reference that never
+    // changes time — i.e. the crossfade machinery is inert until the line warms.
+    const a = new TempoDelay(SR)
+    a.setParams({ timeSeconds: 0.5, feedback: 0.4, tone: 0.2, width: 0.3 })
+    a.setParams({ timeSeconds: 0.004, feedback: 0.4, tone: 0.2, width: 0.3 })
+    const b = new TempoDelay(SR)
+    b.setParams({ timeSeconds: 0.004, feedback: 0.4, tone: 0.2, width: 0.3 })
+    for (let i = 0; i < 1000; i += 1) {
+      const x = Math.sin(i * 0.05)
+      expect(a.process(x, x)[0]).toBeCloseTo(b.process(x, x)[0], 10)
     }
   })
 

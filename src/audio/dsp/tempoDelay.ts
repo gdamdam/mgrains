@@ -35,6 +35,15 @@ const DEFAULT_MAX_SECONDS = 2.5
 // helps stability without obviously distorting a single repeat.
 const LOOP_DRIVE = 0.15
 
+const HALF_PI = Math.PI / 2
+
+// Read-head crossfade length when the delay time changes. The wet tap is read by
+// an integer sample index, so retuning the time (e.g. a BPM change while Repeat
+// is engaged) jumps the read head and clicks. Equal-power-crossfading from the
+// old tap to the new one over a few ms removes the step without smearing the
+// echo. ~5 ms is short enough to stay imperceptible as a time glide.
+const DELAY_XFADE_SECONDS = 0.005
+
 /**
  * Convert a musical division (as a fraction of a whole note, e.g. 1/4 for a
  * quarter note) plus a tempo in BPM into a delay length in seconds. A whole
@@ -56,6 +65,14 @@ export class TempoDelay {
   private readonly toneRight = new OnePole()
 
   private delaySamples = 1
+  // Tap we crossfade FROM while a time change settles, and how many samples of
+  // crossfade remain. `warmed` gates the crossfade so a time set on a cold delay
+  // line (construction / post-reset, buffer all zeros) just snaps — there is no
+  // signal to click and this keeps a reset instance bit-identical to a fresh one.
+  private previousDelaySamples = 1
+  private fadeRemaining = 0
+  private readonly fadeLength: number
+  private warmed = false
   private feedback = 0
   private width = 0
   // Reused output for the allocation-free processInto path (audio-thread safe).
@@ -66,6 +83,7 @@ export class TempoDelay {
     const seconds = maxSeconds > 0 ? maxSeconds : DEFAULT_MAX_SECONDS
     // +1 so a delay of exactly maxSeconds has a valid tap to read.
     this.maxSamples = Math.max(2, Math.floor(seconds * this.sampleRate) + 1)
+    this.fadeLength = Math.max(1, Math.round(DELAY_XFADE_SECONDS * this.sampleRate))
     this.left = new DelayLine(this.maxSamples)
     this.right = new DelayLine(this.maxSamples)
     // Default tone = bright.
@@ -76,8 +94,14 @@ export class TempoDelay {
     const safeTime = Number.isFinite(timeSeconds) ? Math.max(0, timeSeconds) : 0
     // Clamp the tap to the allocated buffer; at least 1 sample so an echo is
     // always audibly later than the input.
-    const requested = Math.round(safeTime * this.sampleRate)
-    this.delaySamples = Math.min(this.maxSamples - 1, Math.max(1, requested))
+    const requested = Math.min(this.maxSamples - 1, Math.max(1, Math.round(safeTime * this.sampleRate)))
+    // Once the line carries signal, retuning the time crossfades read heads
+    // instead of jumping. A change mid-fade restarts from the current target.
+    if (this.warmed && requested !== this.delaySamples) {
+      this.previousDelaySamples = this.delaySamples
+      this.fadeRemaining = this.fadeLength
+    }
+    this.delaySamples = requested
 
     const safeFeedback = Number.isFinite(feedback) ? feedback : 0
     this.feedback = Math.min(MAX_FEEDBACK, Math.max(0, safeFeedback))
@@ -102,10 +126,23 @@ export class TempoDelay {
   processInto(left: number, right: number, out: Float64Array): void {
     const inL = Number.isFinite(left) ? left : 0
     const inR = Number.isFinite(right) ? right : 0
+    this.warmed = true
 
-    // Read the delayed taps (the wet repeats).
-    const delayedL = this.left.read(this.delaySamples)
-    const delayedR = this.right.read(this.delaySamples)
+    // Read the delayed taps (the wet repeats). While a time change settles,
+    // equal-power-crossfade from the old read head to the new one so the tap
+    // jump never clicks.
+    let delayedL = this.left.read(this.delaySamples)
+    let delayedR = this.right.read(this.delaySamples)
+    if (this.fadeRemaining > 0) {
+      const oldL = this.left.read(this.previousDelaySamples)
+      const oldR = this.right.read(this.previousDelaySamples)
+      const t = this.fadeRemaining / this.fadeLength
+      const gOld = Math.sin(t * HALF_PI)
+      const gNew = Math.cos(t * HALF_PI)
+      delayedL = delayedL * gNew + oldL * gOld
+      delayedR = delayedR * gNew + oldR * gOld
+      this.fadeRemaining -= 1
+    }
 
     // Feedback path: damp (LPF) then soft-saturate, mirroring mdrone's
     // fbFilter → fbSat loop. softClipDrive keeps the loop bounded even before
@@ -138,5 +175,10 @@ export class TempoDelay {
     this.right.reset()
     this.toneLeft.reset()
     this.toneRight.reset()
+    // Back to cold: no in-flight crossfade, and the next time set snaps rather
+    // than fading, so a reset instance matches a freshly constructed one.
+    this.fadeRemaining = 0
+    this.previousDelaySamples = this.delaySamples
+    this.warmed = false
   }
 }
