@@ -12,6 +12,8 @@ import {
 import { createDemoSource } from './audio/demoSource'
 import { applyMacro } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
+import { controlForKey, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
+import { MotionRecorder } from './performance/motion'
 import { AdvancedControls } from './components/AdvancedControls'
 import { MacroControls } from './components/MacroControls'
 import { ParameterControl } from './components/ParameterControl'
@@ -73,10 +75,67 @@ export default function App() {
   const [canUndo, setCanUndo] = useState(false)
   const [macroValues, setMacroValues] = useState<Record<string, number>>({})
   const [linkedMacros, setLinkedMacros] = useState<Record<string, boolean>>({})
+  const motionRef = useRef(new MotionRecorder())
+  const motionRafRef = useRef<number | null>(null)
+  const motionT0Ref = useRef(0)
+  const motionLoopRef = useRef(0)
+  const motionLastUpdateRef = useRef(0)
+  const positionRef = useRef(patch.position)
+  const [motionState, setMotionState] = useState<'idle' | 'recording' | 'playing'>('idle')
+  const [hasMotion, setHasMotion] = useState(false)
+  const [keysActive, setKeysActive] = useState(false)
+  const octaveRef = useRef(0)
 
   useEffect(() => () => {
     void engineRef.current?.close()
   }, [])
+
+  // Keep the latest position available to the rAF motion loop without re-subscribing.
+  useEffect(() => {
+    positionRef.current = patch.position
+  }, [patch.position])
+
+  // Cancel any in-flight motion loop on unmount.
+  useEffect(() => () => {
+    if (motionRafRef.current !== null) cancelAnimationFrame(motionRafRef.current)
+  }, [])
+
+  // QWERTY instrument: while active, the computer keyboard plays the source
+  // chromatically and we preventDefault so note keys never collide with other
+  // shortcuts. Octave keys shift range; velocity keys nudge output level.
+  useEffect(() => {
+    if (!keysActive) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return
+      const { code } = event
+      if (isNoteKey(code)) {
+        event.preventDefault()
+        const semitone = keyToSemitone(code) ?? 0
+        const pitchSemitones = Math.max(-36, Math.min(36, octaveRef.current * 12 + semitone))
+        setPatchState((current) => {
+          const next = sanitizePatch({ ...current, pitchSemitones })
+          engineRef.current?.setPatch(next)
+          return next
+        })
+        return
+      }
+      const intent = controlForKey(code)
+      if (!intent) return
+      event.preventDefault()
+      if (intent === 'octave-down') octaveRef.current = Math.max(-3, octaveRef.current - 1)
+      else if (intent === 'octave-up') octaveRef.current = Math.min(3, octaveRef.current + 1)
+      else {
+        const delta = intent === 'velocity-up' ? 0.1 : -0.1
+        setPatchState((current) => {
+          const next = sanitizePatch({ ...current, outputGain: current.outputGain + delta })
+          engineRef.current?.setPatch(next)
+          return next
+        })
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [keysActive])
 
   // Push a patch onto the bounded undo history before a destructive change.
   const pushUndo = (snapshot: GrainPatch) => {
@@ -130,6 +189,66 @@ export default function App() {
 
   const toggleMacroLink = (id: string) => {
     setLinkedMacros((previous) => ({ ...previous, [id]: previous[id] === false }))
+  }
+
+  const cancelMotionLoop = () => {
+    if (motionRafRef.current !== null) {
+      cancelAnimationFrame(motionRafRef.current)
+      motionRafRef.current = null
+    }
+  }
+
+  const recordMotion = () => {
+    cancelMotionLoop()
+    motionRef.current.start()
+    motionT0Ref.current = -1
+    setMotionState('recording')
+    const frame = (now: number) => {
+      if (motionT0Ref.current < 0) motionT0Ref.current = now
+      motionRef.current.record(now - motionT0Ref.current, positionRef.current)
+      motionRafRef.current = requestAnimationFrame(frame)
+    }
+    motionRafRef.current = requestAnimationFrame(frame)
+  }
+
+  const finishRecording = () => {
+    cancelMotionLoop()
+    motionRef.current.stop()
+    motionLoopRef.current = motionRef.current.serialize().durationMs
+    setHasMotion(motionLoopRef.current > 0)
+    setMotionState('idle')
+  }
+
+  const playMotion = () => {
+    cancelMotionLoop()
+    motionT0Ref.current = -1
+    motionLastUpdateRef.current = 0
+    setMotionState('playing')
+    const frame = (now: number) => {
+      if (motionT0Ref.current < 0) motionT0Ref.current = now
+      const elapsed = now - motionT0Ref.current
+      // Throttle position writes to ~30 Hz to respect the worklet patch-rate contract.
+      if (elapsed - motionLastUpdateRef.current >= 33) {
+        motionLastUpdateRef.current = elapsed
+        const value = motionRef.current.value(elapsed, motionLoopRef.current || undefined)
+        if (value !== null) updatePatch({ position: value })
+      }
+      motionRafRef.current = requestAnimationFrame(frame)
+    }
+    motionRafRef.current = requestAnimationFrame(frame)
+  }
+
+  const stopMotionPlayback = () => {
+    cancelMotionLoop()
+    setMotionState('idle')
+  }
+
+  const clearMotion = () => {
+    cancelMotionLoop()
+    motionRef.current.clear()
+    motionLoopRef.current = 0
+    setHasMotion(false)
+    setMotionState('idle')
   }
 
   const startAudio = async () => {
@@ -284,6 +403,14 @@ export default function App() {
             {frozen ? 'Frozen' : 'Freeze'}
           </button>
           <button
+            className={`file-button ${keysActive ? 'is-active' : ''}`}
+            type="button"
+            aria-pressed={keysActive}
+            onClick={() => setKeysActive((value) => !value)}
+          >
+            {keysActive ? 'Keys on' : 'Play keys'}
+          </button>
+          <button
             className="audio-button"
             type="button"
             onClick={() => void startAudio()}
@@ -338,6 +465,30 @@ export default function App() {
           : 'Choose a source to begin'}
         onPositionChange={(position) => updatePatch({ position })}
       />
+
+      <div className="motion-strip">
+        <span className="motion-label">Motion · position</span>
+        <button
+          type="button"
+          className={`file-button ${motionState === 'recording' ? 'is-active' : ''}`}
+          aria-pressed={motionState === 'recording'}
+          onClick={() => (motionState === 'recording' ? finishRecording() : recordMotion())}
+        >
+          {motionState === 'recording' ? 'Stop rec' : 'Record'}
+        </button>
+        <button
+          type="button"
+          className={`file-button ${motionState === 'playing' ? 'is-active' : ''}`}
+          aria-pressed={motionState === 'playing'}
+          disabled={!hasMotion}
+          onClick={() => (motionState === 'playing' ? stopMotionPlayback() : playMotion())}
+        >
+          {motionState === 'playing' ? 'Stop' : 'Play'}
+        </button>
+        <button type="button" className="file-button" disabled={!hasMotion} onClick={clearMotion}>
+          Clear
+        </button>
+      </div>
 
       {sourceMode === 'live' && (
         <div className="live-strip" aria-live="polite">

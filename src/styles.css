@@ -790,6 +790,22 @@ footer {
   accent-color: var(--accent);
 }
 
+.motion-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 10px;
+}
+
+.motion-label {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 840px) {
   .app-header {
     flex-wrap: wrap;
