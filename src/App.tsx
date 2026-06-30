@@ -15,6 +15,7 @@ import { mutatePatch } from './audio/mutate'
 import { controlForKey, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
 import { MotionRecorder } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
+import { AbletonLinkClient, initialLinkState, type LinkState } from './transport/abletonLink'
 import { AdvancedControls } from './components/AdvancedControls'
 import { MacroControls } from './components/MacroControls'
 import { ParameterControl } from './components/ParameterControl'
@@ -94,6 +95,10 @@ export default function App() {
   const presetStoreRef = useRef(new PresetStore())
   const [presets, setPresets] = useState<Preset[]>([])
   const [presetName, setPresetName] = useState('')
+  const linkClientRef = useRef(new AbletonLinkClient())
+  const linkEnabledRef = useRef(false)
+  const [linkEnabled, setLinkEnabled] = useState(false)
+  const [linkState, setLinkState] = useState<LinkState>(initialLinkState())
 
   useEffect(() => () => {
     void engineRef.current?.close()
@@ -106,6 +111,27 @@ export default function App() {
       .then((list) => { if (!cancelled) setPresets(list) })
       .catch(() => { /* storage unavailable — presets stay empty */ })
     return () => { cancelled = true }
+  }, [])
+
+  // Subscribe to the Ableton Link bridge. While Link is enabled and connected it
+  // is the tempo master: the session BPM drives the patch (rounded to whole BPM).
+  useEffect(() => {
+    const client = linkClientRef.current
+    const unsubscribe = client.onChange((state) => {
+      setLinkState(state)
+      if (!linkEnabledRef.current || !state.connected || state.bpm <= 0) return
+      setPatchState((current) => {
+        const target = Math.round(state.bpm)
+        if (target === current.bpm) return current
+        const next = sanitizePatch({ ...current, bpm: target })
+        engineRef.current?.setPatch(next)
+        return next
+      })
+    })
+    return () => {
+      unsubscribe()
+      client.disconnect()
+    }
   }, [])
 
   // Keep the latest position available to the rAF motion loop without re-subscribing.
@@ -231,6 +257,19 @@ export default function App() {
 
   const deletePreset = (name: string) => {
     presetStoreRef.current.delete(name).then(refreshPresets).catch(() => { /* ignore */ })
+  }
+
+  const toggleLink = () => {
+    const client = linkClientRef.current
+    if (linkEnabled) {
+      linkEnabledRef.current = false
+      setLinkEnabled(false)
+      client.disconnect()
+    } else {
+      linkEnabledRef.current = true
+      setLinkEnabled(true)
+      client.connect()
+    }
   }
 
   const cancelMotionLoop = () => {
@@ -453,6 +492,14 @@ export default function App() {
             {keysActive ? 'Keys on' : 'Play keys'}
           </button>
           <button
+            className={`file-button ${linkEnabled ? 'is-active' : ''}`}
+            type="button"
+            aria-pressed={linkEnabled}
+            onClick={toggleLink}
+          >
+            {linkEnabled ? 'Link on' : 'Link'}
+          </button>
+          <button
             className="audio-button"
             type="button"
             onClick={() => void startAudio()}
@@ -485,6 +532,18 @@ export default function App() {
       </section>
 
       {error && <p className="error-message" role="alert">{error}</p>}
+
+      {linkEnabled && (
+        <div className="link-strip" aria-live="polite">
+          <span className={`link-dot ${linkState.connected ? 'is-connected' : ''}`} />
+          <span>{linkState.connected ? 'Linked' : 'Searching for Link…'}</span>
+          {linkState.connected && (
+            <span>{linkState.peers} peer{linkState.peers === 1 ? '' : 's'}</span>
+          )}
+          {linkState.connected && <span>{Math.round(linkState.bpm)} BPM</span>}
+          <span className="link-hint">Run the mpump link-bridge to sync tempo.</span>
+        </div>
+      )}
 
       <div className="patch-actions">
         <button type="button" className="file-button" onClick={mutate}>Mutate</button>
