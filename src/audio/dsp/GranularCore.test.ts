@@ -273,6 +273,36 @@ describe('GranularCore', () => {
     expect(countSpawned(core, 500)).toBe(2)
   })
 
+  it('applies mode FX (drive/crush/damp) only when engaged and stays bounded', () => {
+    const source = makeSource()
+    const dry = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    const wet = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    dry.setPatch({ ...DEFAULT_PATCH })
+    wet.setPatch({ ...DEFAULT_PATCH, drive: 1, crush: 1, damp: 1 })
+    dry.setSource(source, source)
+    wet.setSource(source, source)
+
+    const dryOut = render(dry)
+    const wetOut = render(wet)
+
+    // The grain RNG sequence is identical, so any difference is the FX chain.
+    expect(wetOut).not.toEqual(dryOut)
+    expect(wetOut.every(Number.isFinite)).toBe(true)
+    expect(Math.max(...wetOut.map(Math.abs))).toBeLessThanOrEqual(1)
+  })
+
+  it('leaves the dry signal untouched when FX are at zero', () => {
+    const source = makeSource()
+    const a = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    const b = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    a.setPatch({ ...DEFAULT_PATCH, drive: 0, crush: 0, damp: 0 })
+    b.setPatch({ ...DEFAULT_PATCH })
+    a.setSource(source, source)
+    b.setSource(source, source)
+
+    expect(render(a)).toEqual(render(b))
+  })
+
   it('produces silence without a source', () => {
     const core = new GranularCore({ sampleRate: 48_000 })
     const left = new Float32Array(128).fill(1)

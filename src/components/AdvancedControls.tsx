@@ -110,6 +110,33 @@ export function AdvancedControls({ patch, onChange, onReset }: AdvancedControlsP
             decimals={0}
             onChange={(value) => onChange({ outputGain: value / 100 })}
           />
+          <ParameterControl
+            label="Drive"
+            value={patch.drive * 100}
+            minimum={0}
+            maximum={100}
+            unit="%"
+            decimals={0}
+            onChange={(value) => onChange({ drive: value / 100 })}
+          />
+          <ParameterControl
+            label="Crush"
+            value={patch.crush * 100}
+            minimum={0}
+            maximum={100}
+            unit="%"
+            decimals={0}
+            onChange={(value) => onChange({ crush: value / 100 })}
+          />
+          <ParameterControl
+            label="Damp"
+            value={patch.damp * 100}
+            minimum={0}
+            maximum={100}
+            unit="%"
+            decimals={0}
+            onChange={(value) => onChange({ damp: value / 100 })}
+          />
           <label className="parameter-control select-control">
             <span className="parameter-label">Window</span>
             <span className="parameter-value">{patch.window}</span>
