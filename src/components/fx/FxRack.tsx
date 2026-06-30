@@ -52,6 +52,24 @@ const FX: FxDef[] = [
     amountKey: 'formantAmount',
     params: [{ key: 'formantVowel', label: 'Vowel', min: 0, max: 1, unit: '%', kind: 'pct' }],
   },
+  {
+    id: 'comb',
+    label: 'Comb',
+    amountKey: 'combAmount',
+    params: [{ key: 'combFreq', label: 'Freq', min: 20, max: 4000, step: 1, unit: 'Hz', kind: 'raw' }],
+  },
+  {
+    id: 'wow',
+    label: 'Wow',
+    amountKey: 'wowAmount',
+    params: [{ key: 'wowRate', label: 'Rate', min: 0.1, max: 8, step: 0.1, unit: 'Hz', kind: 'raw' }],
+  },
+  {
+    id: 'sub',
+    label: 'Sub',
+    amountKey: 'subAmount',
+    params: [{ key: 'subTune', label: 'Tune', min: 30, max: 120, step: 1, unit: 'Hz', kind: 'raw' }],
+  },
   { id: 'space', label: 'Space', amountKey: 'space', params: [] },
   { id: 'repeat', label: 'Repeat', amountKey: 'repeat', params: [] },
 ]

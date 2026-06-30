@@ -52,6 +52,18 @@ export function fxCurvePoints(id: string, patch: GrainPatch): number[] {
       const centers = [0.1 + v * 0.12, 0.42 + v * 0.04, 0.74 - v * 0.12]
       return curve((t) => centers.reduce((y, c) => y + Math.exp(-((t - c) ** 2) / 0.004), 0))
     }
+    case 'wow': {
+      const cycles = 2 + patch.wowRate
+      return curve((t) => 0.5 + 0.45 * Math.sin(t * Math.PI * 2 * cycles + Math.sin(t * Math.PI * 2) * 1.5))
+    }
+    case 'comb': {
+      const teeth = 2 + (patch.combFreq / 4000) * 18
+      return curve((t) => Math.abs(Math.sin(t * Math.PI * teeth)) ** 4)
+    }
+    case 'sub': {
+      const tune = (patch.subTune - 30) / 90
+      return curve((t) => Math.exp(-((t - 0.04 - tune * 0.06) ** 2) / 0.006))
+    }
     default:
       return curve(() => 0.5)
   }

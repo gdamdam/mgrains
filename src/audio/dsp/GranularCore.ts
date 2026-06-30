@@ -8,7 +8,11 @@ import {
 import { bitcrush, OnePole, softClipDrive } from './effects'
 import { Formant } from './formant'
 import { Reverb } from './reverb'
+import { Comb } from './comb'
+import { Limiter } from './limiter'
 import { RingMod } from './ringMod'
+import { Sub } from './sub'
+import { Wow } from './wow'
 import { XorShift32 } from './rng'
 import { shatterStepFrames } from './shatterTiming'
 import { Tape } from './tape'
@@ -103,6 +107,22 @@ export class GranularCore {
   private readonly tape: Tape
   private readonly formant: Formant
   private readonly ringMod: RingMod
+  private smoothedWow = 0
+  private targetWow = 0
+  private wowRate = DEFAULT_PATCH.wowRate
+  private smoothedComb = 0
+  private targetComb = 0
+  private combFreq = DEFAULT_PATCH.combFreq
+  private smoothedSub = 0
+  private targetSub = 0
+  private subTune = DEFAULT_PATCH.subTune
+  private wowActive = false
+  private combActive = false
+  private subActive = false
+  private readonly wow: Wow
+  private readonly comb: Comb
+  private readonly sub: Sub
+  private readonly limiter: Limiter
   // Held note pitch offsets (semitones) for chromatic polyphony, capped to a
   // small voice count so a chord can never overrun the grain pool.
   private readonly activeNotes = new Float64Array(8)
@@ -149,6 +169,11 @@ export class GranularCore {
     this.tape = new Tape(this.sampleRate)
     this.formant = new Formant(this.sampleRate)
     this.ringMod = new RingMod(this.sampleRate)
+    this.wow = new Wow(this.sampleRate)
+    this.comb = new Comb(this.sampleRate)
+    this.sub = new Sub(this.sampleRate)
+    this.limiter = new Limiter(this.sampleRate)
+    this.limiter.setParams({ ceiling: 0.95, release: 0.1 })
     this.repeatTimeSeconds = divisionToSeconds(REPEAT_DIVISION, this.patch.bpm)
   }
 
@@ -295,6 +320,13 @@ export class GranularCore {
     this.tape.reset()
     this.formant.reset()
     this.ringMod.reset()
+    this.wow.reset()
+    this.comb.reset()
+    this.sub.reset()
+    this.limiter.reset()
+    this.wowActive = false
+    this.combActive = false
+    this.subActive = false
     this.spaceActive = false
     this.repeatActive = false
     this.tapeActive = false
@@ -312,6 +344,9 @@ export class GranularCore {
     this.smoothedTape = this.targetTape
     this.smoothedFormant = this.targetFormant
     this.smoothedRingMod = this.targetRingMod
+    this.smoothedWow = this.targetWow
+    this.smoothedComb = this.targetComb
+    this.smoothedSub = this.targetSub
   }
 
   // Run a stereo FX gated by `amount` (exact dry bypass at <= FX_EPSILON, with a
@@ -379,6 +414,9 @@ export class GranularCore {
     this.tape.setParams({ drive: 0.2 + this.targetTape * 0.6, tone: this.tapeTone })
     this.formant.setParams({ vowel: this.formantVowel, amount: 1 })
     this.ringMod.setParams({ frequency: this.ringModHz, amount: 1 })
+    this.wow.setParams({ rate: this.wowRate, depth: 0.7 })
+    this.comb.setParams({ frequency: this.combFreq, resonance: 0.85 })
+    this.sub.setParams({ tune: this.subTune })
 
     for (let offset = 0; offset < outputLeft.length; offset += 1) {
       const absoluteFrame = this.frame + offset
@@ -394,6 +432,9 @@ export class GranularCore {
       this.smoothedTape += (this.targetTape - this.smoothedTape) * this.outputSmoothingCoefficient
       this.smoothedFormant += (this.targetFormant - this.smoothedFormant) * this.outputSmoothingCoefficient
       this.smoothedRingMod += (this.targetRingMod - this.smoothedRingMod) * this.outputSmoothingCoefficient
+      this.smoothedWow += (this.targetWow - this.smoothedWow) * this.outputSmoothingCoefficient
+      this.smoothedComb += (this.targetComb - this.smoothedComb) * this.outputSmoothingCoefficient
+      this.smoothedSub += (this.targetSub - this.smoothedSub) * this.outputSmoothingCoefficient
 
       if (absoluteFrame >= this.nextGrainFrame) {
         if (this.patch.mode === 'shatter') {
@@ -463,6 +504,15 @@ export class GranularCore {
       this.formantActive = this.runStereoFx(this.formant, this.smoothedFormant, this.formantActive, mixL, mixR)
       mixL = this.fxScratch[0]
       mixR = this.fxScratch[1]
+      this.combActive = this.runStereoFx(this.comb, this.smoothedComb, this.combActive, mixL, mixR)
+      mixL = this.fxScratch[0]
+      mixR = this.fxScratch[1]
+      this.wowActive = this.runStereoFx(this.wow, this.smoothedWow, this.wowActive, mixL, mixR)
+      mixL = this.fxScratch[0]
+      mixR = this.fxScratch[1]
+      this.subActive = this.runStereoFx(this.sub, this.smoothedSub, this.subActive, mixL, mixR)
+      mixL = this.fxScratch[0]
+      mixR = this.fxScratch[1]
       this.spaceActive = this.runStereoFx(this.reverb, this.smoothedSpace, this.spaceActive, mixL, mixR)
       mixL = this.fxScratch[0]
       mixR = this.fxScratch[1]
@@ -470,8 +520,10 @@ export class GranularCore {
       mixL = this.fxScratch[0]
       mixR = this.fxScratch[1]
 
-      left = this.sanitizeSample(mixL)
-      right = this.sanitizeSample(mixR)
+      // Master limiter: stereo-linked brickwall at the ceiling, the final stage.
+      this.limiter.processInto(mixL, mixR, this.fxScratch)
+      left = this.fxScratch[0]
+      right = this.fxScratch[1]
       outputLeft[offset] = left
       outputRight[offset] = right
       peak = Math.max(peak, Math.abs(left), Math.abs(right))
@@ -597,6 +649,12 @@ export class GranularCore {
     this.formantVowel = nextPatch.formantVowel
     this.targetRingMod = nextPatch.ringModAmount
     this.ringModHz = nextPatch.ringModHz
+    this.targetWow = nextPatch.wowAmount
+    this.wowRate = nextPatch.wowRate
+    this.targetComb = nextPatch.combAmount
+    this.combFreq = nextPatch.combFreq
+    this.targetSub = nextPatch.subAmount
+    this.subTune = nextPatch.subTune
     this.repeatTimeSeconds = divisionToSeconds(REPEAT_DIVISION, nextPatch.bpm)
     if (nextPatch.seed !== previousSeed) this.rng.reset(nextPatch.seed)
     if (
@@ -664,14 +722,6 @@ export class GranularCore {
 
   private wrapUnit(value: number): number {
     return ((value % 1) + 1) % 1
-  }
-
-  private sanitizeSample(value: number): number {
-    if (!Number.isFinite(value)) return 0
-    const magnitude = Math.abs(value)
-    if (magnitude <= 0.95) return value
-    const compressed = 0.95 + 0.05 * Math.tanh((magnitude - 0.95) / 0.05)
-    return Math.sign(value) * compressed
   }
 }
 

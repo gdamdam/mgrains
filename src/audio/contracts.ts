@@ -55,6 +55,12 @@ export interface GrainPatch {
   formantVowel: number
   ringModAmount: number
   ringModHz: number
+  wowAmount: number
+  wowRate: number
+  combAmount: number
+  combFreq: number
+  subAmount: number
+  subTune: number
   seed: number
   bpm: number
   shatterDivision: ShatterDivision
@@ -99,6 +105,12 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   formantVowel: 0,
   ringModAmount: 0,
   ringModHz: 440,
+  wowAmount: 0,
+  wowRate: 5,
+  combAmount: 0,
+  combFreq: 220,
+  subAmount: 0,
+  subTune: 55,
   seed: 0x6d677261,
   bpm: 120,
   shatterDivision: '1/16',
@@ -128,6 +140,12 @@ export const PATCH_RANGES = Object.freeze({
   formantVowel: [0, 1] as const,
   ringModAmount: [0, 1] as const,
   ringModHz: [1, 4000] as const,
+  wowAmount: [0, 1] as const,
+  wowRate: [0.1, 8] as const,
+  combAmount: [0, 1] as const,
+  combFreq: [20, 4000] as const,
+  subAmount: [0, 1] as const,
+  subTune: [30, 120] as const,
   bpm: [30, 300] as const,
 })
 
@@ -214,6 +232,12 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
     formantVowel: clamp(candidate.formantVowel, ...PATCH_RANGES.formantVowel),
     ringModAmount: clamp(candidate.ringModAmount, ...PATCH_RANGES.ringModAmount),
     ringModHz: clamp(candidate.ringModHz, ...PATCH_RANGES.ringModHz),
+    wowAmount: clamp(candidate.wowAmount, ...PATCH_RANGES.wowAmount),
+    wowRate: clamp(candidate.wowRate, ...PATCH_RANGES.wowRate),
+    combAmount: clamp(candidate.combAmount, ...PATCH_RANGES.combAmount),
+    combFreq: clamp(candidate.combFreq, ...PATCH_RANGES.combFreq),
+    subAmount: clamp(candidate.subAmount, ...PATCH_RANGES.subAmount),
+    subTune: clamp(candidate.subTune, ...PATCH_RANGES.subTune),
     seed: Number.isFinite(candidate.seed) ? candidate.seed >>> 0 : DEFAULT_PATCH.seed,
     bpm: clamp(candidate.bpm, ...PATCH_RANGES.bpm),
     shatterDivision: SHATTER_DIVISIONS.includes(candidate.shatterDivision)
