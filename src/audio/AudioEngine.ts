@@ -100,6 +100,11 @@ export class AudioEngine {
     this.send({ type: 'set-patch', patch })
   }
 
+  // Held note pitch offsets (semitones) for chromatic polyphony.
+  setNotes(offsets: number[]): void {
+    this.send({ type: 'set-notes', offsets })
+  }
+
   setSource(source: AudioSourceData): void {
     this.stopLiveInput()
     const left = source.left.slice()

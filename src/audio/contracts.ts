@@ -169,6 +169,7 @@ export type MainToEngineMessage =
   | { type: 'set-freeze'; frozen: boolean }
   | { type: 'clear-live-buffer' }
   | { type: 'clear-source' }
+  | { type: 'set-notes'; offsets: number[] }
   | { type: 'reset'; seed?: number }
 
 export function clamp(value: number, minimum: number, maximum: number): number {

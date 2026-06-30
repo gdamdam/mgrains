@@ -103,6 +103,10 @@ export class GranularCore {
   private readonly tape: Tape
   private readonly formant: Formant
   private readonly ringMod: RingMod
+  // Held note pitch offsets (semitones) for chromatic polyphony, capped to a
+  // small voice count so a chord can never overrun the grain pool.
+  private readonly activeNotes = new Float64Array(8)
+  private activeNoteCount = 0
 
   private readonly active: Uint8Array
   private readonly sourcePosition: Float64Array
@@ -394,7 +398,7 @@ export class GranularCore {
         if (this.patch.mode === 'shatter') {
           spawnedGrains += this.scheduleShatterEvent()
         } else {
-          this.spawnGrain()
+          this.spawnVoices(0, false)
           spawnedGrains += 1
           const intervalFrames = this.sampleRate / this.patch.densityHz
           const jitter = 1 + this.rng.nextBipolar() * this.patch.timingJitter * 0.45
@@ -485,7 +489,7 @@ export class GranularCore {
     const step = this.patch.shatterSteps[this.shatterStepIndex]
     this.lastShatterStep = this.shatterStepIndex
     const shouldSpawn = step.enabled && this.rng.nextFloat() <= step.probability
-    if (shouldSpawn) this.spawnGrain(step.pitchOffsetSemitones, step.reverse)
+    if (shouldSpawn) this.spawnVoices(step.pitchOffsetSemitones, step.reverse)
 
     const stepFrames = shatterStepFrames(
       this.sampleRate,
@@ -500,6 +504,29 @@ export class GranularCore {
     }
 
     return shouldSpawn ? 1 : 0
+  }
+
+  // Set the held note offsets (semitones). Empty => grains spawn at the patch's
+  // base pitch (monophonic); otherwise each grain event spawns one grain per note.
+  setActiveNotes(offsets: number[]): void {
+    const count = Math.min(this.activeNotes.length, offsets.length)
+    for (let index = 0; index < count; index += 1) {
+      const value = offsets[index]
+      this.activeNotes[index] = Number.isFinite(value) ? value : 0
+    }
+    this.activeNoteCount = count
+  }
+
+  // Spawn one grain per held note (transposed by the note + extraSemitones), or
+  // a single grain at the base pitch when no notes are held.
+  private spawnVoices(extraSemitones: number, forceReverse: boolean): void {
+    if (this.activeNoteCount === 0) {
+      this.spawnGrain(extraSemitones, forceReverse)
+      return
+    }
+    for (let index = 0; index < this.activeNoteCount; index += 1) {
+      this.spawnGrain(extraSemitones + this.activeNotes[index], forceReverse)
+    }
   }
 
   private spawnGrain(pitchOffsetSemitones = 0, forceReverse = false): void {

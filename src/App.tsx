@@ -93,6 +93,7 @@ export default function App() {
   const [hasMotion, setHasMotion] = useState(false)
   const [keysActive, setKeysActive] = useState(false)
   const octaveRef = useRef(0)
+  const heldNotesRef = useRef<Map<string, number>>(new Map())
   const presetStoreRef = useRef(new PresetStore())
   const [presets, setPresets] = useState<Preset[]>([])
   const [presetName, setPresetName] = useState('')
@@ -146,22 +147,22 @@ export default function App() {
   }, [])
 
   // QWERTY instrument: while active, the computer keyboard plays the source
-  // chromatically and we preventDefault so note keys never collide with other
-  // shortcuts. Octave keys shift range; velocity keys nudge output level.
+  // chromatically and polyphonically. Held note keys accumulate as pitch
+  // offsets and stream to the engine as voices; keyup releases them. Octave
+  // keys shift range, velocity keys nudge output level, and we preventDefault
+  // so note keys never collide with other shortcuts.
   useEffect(() => {
     if (!keysActive) return
+    const held = heldNotesRef.current
+    const pushNotes = () => engineRef.current?.setNotes([...held.values()])
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return
       const { code } = event
       if (isNoteKey(code)) {
         event.preventDefault()
         const semitone = keyToSemitone(code) ?? 0
-        const pitchSemitones = Math.max(-36, Math.min(36, octaveRef.current * 12 + semitone))
-        setPatchState((current) => {
-          const next = sanitizePatch({ ...current, pitchSemitones })
-          engineRef.current?.setPatch(next)
-          return next
-        })
+        held.set(code, octaveRef.current * 12 + semitone)
+        pushNotes()
         return
       }
       const intent = controlForKey(code)
@@ -178,8 +179,17 @@ export default function App() {
         })
       }
     }
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (isNoteKey(event.code) && held.delete(event.code)) pushNotes()
+    }
     window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      held.clear()
+      engineRef.current?.setNotes([])
+    }
   }, [keysActive])
 
   // Push a patch onto the bounded undo history before a destructive change.

@@ -337,6 +337,24 @@ describe('GranularCore', () => {
     expect(Math.max(...wetOut.map(Math.abs))).toBeLessThanOrEqual(1)
   })
 
+  it('plays held notes as polyphonic voices', () => {
+    const source = makeSource()
+    const mono = new GranularCore({ sampleRate: 48_000, maxGrains: 32 })
+    const poly = new GranularCore({ sampleRate: 48_000, maxGrains: 32 })
+    mono.setPatch({ ...DEFAULT_PATCH })
+    poly.setPatch({ ...DEFAULT_PATCH })
+    mono.setSource(source, source)
+    poly.setSource(source, source)
+    poly.setActiveNotes([0, 7])
+
+    const monoOut = render(mono)
+    const polyOut = render(poly)
+
+    expect(polyOut).not.toEqual(monoOut)
+    expect(polyOut.every(Number.isFinite)).toBe(true)
+    expect(poly.activeGrainCount).toBeGreaterThanOrEqual(mono.activeGrainCount)
+  })
+
   it('produces silence without a source', () => {
     const core = new GranularCore({ sampleRate: 48_000 })
     const left = new Float32Array(128).fill(1)
