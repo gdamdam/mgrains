@@ -1,0 +1,131 @@
+// Deterministic, DOM-free polyphonic voice allocator for the chromatic
+// instrument. It maps incoming notes to a fixed pool of voices, reusing free
+// voices and stealing the oldest sounding voice when the pool is exhausted.
+//
+// Determinism: "age"/start-order comes from an internal monotonically
+// increasing counter rather than wall-clock time, so a given sequence of
+// noteOn/noteOff calls always yields the same allocation. No Date.now and no
+// Math.random are used anywhere.
+
+/** A snapshot of one sounding voice. */
+export interface ActiveVoice {
+  /** Index of the voice within the pool (0..voiceCount-1). */
+  index: number
+  /** The note currently sounding on this voice. */
+  note: number
+  /** The velocity the note was triggered with (0..1, defaults to 1). */
+  velocity: number
+  /** Monotonic start order; lower means started earlier (older). */
+  age: number
+}
+
+interface VoiceSlot {
+  note: number
+  velocity: number
+  age: number
+  active: boolean
+}
+
+export class VoiceAllocator {
+  private readonly slots: VoiceSlot[]
+  // Monotonic counter used as the start-order "age". Strictly increasing per
+  // noteOn so the oldest active voice always has the smallest age.
+  private clock = 0
+
+  constructor(voiceCount: number) {
+    if (!Number.isInteger(voiceCount) || voiceCount < 1) {
+      throw new RangeError('voiceCount must be a positive integer')
+    }
+    this.slots = Array.from({ length: voiceCount }, () => ({
+      note: -1,
+      velocity: 0,
+      age: 0,
+      active: false,
+    }))
+  }
+
+  /**
+   * Triggers a note and returns the assigned voice index.
+   * - If the note is already sounding, its voice is retriggered (no new slot).
+   * - Otherwise a free voice is used if available.
+   * - If all voices are busy, the oldest-started voice is stolen.
+   */
+  noteOn(note: number, velocity = 1): number {
+    const age = this.clock++
+
+    // Retrigger an already-sounding note on its existing voice.
+    const existing = this.slots.findIndex(
+      (slot) => slot.active && slot.note === note,
+    )
+    if (existing !== -1) {
+      const slot = this.slots[existing]
+      slot.velocity = velocity
+      slot.age = age
+      return existing
+    }
+
+    // Prefer the first free voice.
+    const free = this.slots.findIndex((slot) => !slot.active)
+    const target = free !== -1 ? free : this.oldestActiveIndex()
+
+    const slot = this.slots[target]
+    slot.note = note
+    slot.velocity = velocity
+    slot.age = age
+    slot.active = true
+    return target
+  }
+
+  /**
+   * Frees the voice sounding the given note.
+   * Returns the freed voice index, or null when the note is not active.
+   */
+  noteOff(note: number): number | null {
+    const index = this.slots.findIndex(
+      (slot) => slot.active && slot.note === note,
+    )
+    if (index === -1) {
+      return null
+    }
+    this.slots[index].active = false
+    return index
+  }
+
+  /** Snapshot of all sounding voices, ordered by ascending age (oldest first). */
+  activeVoices(): ReadonlyArray<ActiveVoice> {
+    return this.slots
+      .map((slot, index) => ({ slot, index }))
+      .filter(({ slot }) => slot.active)
+      .sort((a, b) => a.slot.age - b.slot.age)
+      .map(({ slot, index }) => ({
+        index,
+        note: slot.note,
+        velocity: slot.velocity,
+        age: slot.age,
+      }))
+  }
+
+  /** Releases every voice. The age counter keeps advancing for determinism. */
+  reset(): void {
+    for (const slot of this.slots) {
+      slot.active = false
+      slot.note = -1
+      slot.velocity = 0
+      slot.age = 0
+    }
+  }
+
+  // Index of the active voice with the smallest age (started earliest).
+  private oldestActiveIndex(): number {
+    let oldest = -1
+    let oldestAge = Number.POSITIVE_INFINITY
+    for (let i = 0; i < this.slots.length; i++) {
+      const slot = this.slots[i]
+      if (slot.active && slot.age < oldestAge) {
+        oldestAge = slot.age
+        oldest = i
+      }
+    }
+    return oldest
+  }
+}
