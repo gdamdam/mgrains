@@ -51,14 +51,20 @@ const WARMTH_PARAMS = ['damp', 'drive'] as const satisfies ReadonlyArray<keyof G
 const CRUSH_PARAMS = ['drive', 'crush', 'damp'] as const satisfies ReadonlyArray<
   keyof GrainPatch
 >
+const SPACE_PARAMS = ['space', 'stereoSpread'] as const satisfies ReadonlyArray<
+  keyof GrainPatch
+>
+const REPEAT_PARAMS = ['repeat'] as const satisfies ReadonlyArray<keyof GrainPatch>
 
 export const MACROS: ReadonlyArray<MacroDef> = Object.freeze([
   Object.freeze({ id: 'cloud', label: 'Cloud', mode: 'bloom', params: CLOUD_PARAMS }),
   Object.freeze({ id: 'drift', label: 'Drift', mode: 'bloom', params: DRIFT_PARAMS }),
   Object.freeze({ id: 'warmth', label: 'Warmth', mode: 'bloom', params: WARMTH_PARAMS }),
+  Object.freeze({ id: 'space', label: 'Space', mode: 'bloom', params: SPACE_PARAMS }),
   Object.freeze({ id: 'chop', label: 'Chop', mode: 'shatter', params: CHOP_PARAMS }),
   Object.freeze({ id: 'scatter', label: 'Scatter', mode: 'shatter', params: SCATTER_PARAMS }),
   Object.freeze({ id: 'crush', label: 'Crush', mode: 'shatter', params: CRUSH_PARAMS }),
+  Object.freeze({ id: 'repeat', label: 'Repeat', mode: 'shatter', params: REPEAT_PARAMS }),
 ])
 
 // Params each macro controls, exposed so the UI can drive Link/Unlink: an
@@ -126,6 +132,17 @@ export function applyMacro(
         drive: lerp([0, 1], v),
         crush: lerp([0, 1], v),
         damp: lerp([0, 0.5], v),
+      }
+    case 'space':
+      // Open it up: reverb wet plus a wider stereo image.
+      return {
+        space: lerp([0, 1], v),
+        stereoSpread: lerp([0.5, 1], v),
+      }
+    case 'repeat':
+      // Tempo-synced echoes: more wet/feedback as the knob rises.
+      return {
+        repeat: lerp([0, 1], v),
       }
     default:
       return {}

@@ -12,9 +12,9 @@ function inRange(value: number, range: readonly [number, number]): boolean {
 }
 
 describe('MACROS registry', () => {
-  it('contains cloud, drift, warmth (bloom) and chop, scatter, crush (shatter)', () => {
+  it('contains four bloom macros (cloud/drift/warmth/space) and four shatter (chop/scatter/crush/repeat)', () => {
     const ids = MACROS.map((macro) => macro.id).sort()
-    expect(ids).toEqual(['chop', 'cloud', 'crush', 'drift', 'scatter', 'warmth'])
+    expect(ids).toEqual(['chop', 'cloud', 'crush', 'drift', 'repeat', 'scatter', 'space', 'warmth'])
   })
 
   it('tags each macro with the mode it belongs to', () => {
@@ -22,9 +22,11 @@ describe('MACROS registry', () => {
     expect(byId.get('cloud')).toBe('bloom')
     expect(byId.get('drift')).toBe('bloom')
     expect(byId.get('warmth')).toBe('bloom')
+    expect(byId.get('space')).toBe('bloom')
     expect(byId.get('chop')).toBe('shatter')
     expect(byId.get('scatter')).toBe('shatter')
     expect(byId.get('crush')).toBe('shatter')
+    expect(byId.get('repeat')).toBe('shatter')
   })
 
   it('keeps MACRO_PARAMS keys aligned with the registry', () => {
@@ -161,6 +163,28 @@ describe('applyMacro: crush', () => {
       expect(inRange(result.drive as number, PATCH_RANGES.drive)).toBe(true)
       expect(inRange(result.crush as number, PATCH_RANGES.crush)).toBe(true)
       expect(inRange(result.damp as number, PATCH_RANGES.damp)).toBe(true)
+    }
+  })
+})
+
+describe('applyMacro: space', () => {
+  it('grows the reverb amount with value, staying in range', () => {
+    const low = applyMacro(DEFAULT_PATCH, 'space', 0)
+    const high = applyMacro(DEFAULT_PATCH, 'space', 1)
+    expect((high.space as number)).toBeGreaterThan(low.space as number)
+    for (const result of [low, high]) {
+      expect(inRange(result.space as number, PATCH_RANGES.space)).toBe(true)
+    }
+  })
+})
+
+describe('applyMacro: repeat', () => {
+  it('grows the delay amount with value, staying in range', () => {
+    const low = applyMacro(DEFAULT_PATCH, 'repeat', 0)
+    const high = applyMacro(DEFAULT_PATCH, 'repeat', 1)
+    expect((high.repeat as number)).toBeGreaterThan(low.repeat as number)
+    for (const result of [low, high]) {
+      expect(inRange(result.repeat as number, PATCH_RANGES.repeat)).toBe(true)
     }
   })
 })

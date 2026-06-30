@@ -58,6 +58,8 @@ export class TempoDelay {
   private delaySamples = 1
   private feedback = 0
   private width = 0
+  // Reused output for the allocation-free processInto path (audio-thread safe).
+  private readonly scratch = new Float64Array(2)
 
   constructor(sampleRate: number, maxSeconds: number = DEFAULT_MAX_SECONDS) {
     this.sampleRate = sampleRate > 0 ? sampleRate : 48000
@@ -92,7 +94,12 @@ export class TempoDelay {
     this.toneRight.setCutoff(cutoff, 'lowpass')
   }
 
-  process(left: number, right: number): [number, number] {
+  /**
+   * Process one stereo sample pair into `out` ([left, right]) with no
+   * allocation — DelayLine/OnePole reuse their buffers, so this is safe to call
+   * per sample on the audio thread.
+   */
+  processInto(left: number, right: number, out: Float64Array): void {
     const inL = Number.isFinite(left) ? left : 0
     const inR = Number.isFinite(right) ? right : 0
 
@@ -111,15 +118,19 @@ export class TempoDelay {
     // echoes between speakers. crossfeed blends the two.
     const cross = this.width
     const direct = 1 - cross
-    const writeL = inL + this.feedback * (fbL * direct + fbR * cross)
-    const writeR = inR + this.feedback * (fbR * direct + fbL * cross)
-
-    this.left.write(writeL)
-    this.right.write(writeR)
+    this.left.write(inL + this.feedback * (fbL * direct + fbR * cross))
+    this.right.write(inR + this.feedback * (fbR * direct + fbL * cross))
 
     // The wet output is the delayed tap (pre-feedback-mix), matching the
     // mdrone topology where the wet send taps the delay node directly.
-    return [delayedL, delayedR]
+    out[0] = delayedL
+    out[1] = delayedR
+  }
+
+  /** Convenience wrapper returning a fresh [left, right] tuple (used in tests). */
+  process(left: number, right: number): [number, number] {
+    this.processInto(left, right, this.scratch)
+    return [this.scratch[0], this.scratch[1]]
   }
 
   reset(): void {

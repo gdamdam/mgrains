@@ -142,6 +142,8 @@ export class Reverb {
   private readonly allpassesR: AllpassFilter[]
   private wet1 = 1
   private wet2 = 0
+  // Reused output for the allocation-free processInto path (audio-thread safe).
+  private readonly scratch = new Float64Array(2)
 
   constructor(sampleRate: number) {
     const sr = Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : FREEVERB_SR
@@ -179,11 +181,11 @@ export class Reverb {
   }
 
   /**
-   * Process one stereo sample pair. Returns a fresh 2-tuple [left, right].
-   * The hot work happens in the comb/allpass filters which reuse their
-   * preallocated buffers; only this tiny tuple is allocated per call.
+   * Process one stereo sample pair into `out` ([left, right]) with no
+   * allocation — the comb/allpass filters reuse their preallocated buffers, so
+   * this is safe to call per sample on the audio thread.
    */
-  process(left: number, right: number): [number, number] {
+  processInto(left: number, right: number, out: Float64Array): void {
     const inL = Number.isFinite(left) ? left : 0
     const inR = Number.isFinite(right) ? right : 0
     // Mono fold-down scaled by fixedGain, like Freeverb's input stage.
@@ -203,9 +205,14 @@ export class Reverb {
     }
 
     // Stereo width cross-mix.
-    const wetL = outL * this.wet1 + outR * this.wet2
-    const wetR = outR * this.wet1 + outL * this.wet2
-    return [wetL * OUT_GAIN, wetR * OUT_GAIN]
+    out[0] = (outL * this.wet1 + outR * this.wet2) * OUT_GAIN
+    out[1] = (outR * this.wet1 + outL * this.wet2) * OUT_GAIN
+  }
+
+  /** Convenience wrapper returning a fresh [left, right] tuple (used in tests). */
+  process(left: number, right: number): [number, number] {
+    this.processInto(left, right, this.scratch)
+    return [this.scratch[0], this.scratch[1]]
   }
 
   reset(): void {

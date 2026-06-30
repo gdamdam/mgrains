@@ -6,8 +6,10 @@ import {
   type GrainWindow,
 } from '../contracts'
 import { bitcrush, OnePole, softClipDrive } from './effects'
+import { Reverb } from './reverb'
 import { XorShift32 } from './rng'
 import { shatterStepFrames } from './shatterTiming'
+import { divisionToSeconds, TempoDelay } from './tempoDelay'
 import { grainWindow } from './windows'
 
 export interface GranularCoreOptions {
@@ -30,6 +32,9 @@ const OUTPUT_SMOOTHING_SECONDS = 0.02
 const FX_EPSILON = 1e-4
 // Darkest lowpass the damping macro reaches (normalized cutoff), keeping some body.
 const DAMP_MIN_CUTOFF = 0.04
+// Repeat (delay) time as a fraction of a whole note — a dotted eighth (3/16),
+// the classic tempo-synced delay feel.
+const REPEAT_DIVISION = 0.1875
 
 type ModeTransitionState = 'steady' | 'fade-out' | 'fade-in'
 
@@ -63,6 +68,16 @@ export class GranularCore {
   private targetDamp = 0
   private readonly filterLeft = new OnePole()
   private readonly filterRight = new OnePole()
+  private smoothedSpace = 0
+  private targetSpace = 0
+  private smoothedRepeat = 0
+  private targetRepeat = 0
+  private spaceActive = false
+  private repeatActive = false
+  private repeatTimeSeconds = 0
+  private readonly reverb: Reverb
+  private readonly delay: TempoDelay
+  private readonly fxScratch = new Float64Array(2)
 
   private readonly active: Uint8Array
   private readonly sourcePosition: Float64Array
@@ -99,6 +114,9 @@ export class GranularCore {
     this.windowCode = new Uint8Array(this.maxGrains)
     this.regionStartFrame = new Float64Array(this.maxGrains)
     this.regionLengthFrames = new Float64Array(this.maxGrains)
+    this.reverb = new Reverb(this.sampleRate)
+    this.delay = new TempoDelay(this.sampleRate)
+    this.repeatTimeSeconds = divisionToSeconds(REPEAT_DIVISION, this.patch.bpm)
   }
 
   get currentFrame(): number {
@@ -239,6 +257,10 @@ export class GranularCore {
     this.snapFxToTargets()
     this.filterLeft.reset()
     this.filterRight.reset()
+    this.reverb.reset()
+    this.delay.reset()
+    this.spaceActive = false
+    this.repeatActive = false
     this.rng.reset(seed ?? this.patch.seed)
   }
 
@@ -246,12 +268,15 @@ export class GranularCore {
     this.smoothedDrive = this.targetDrive
     this.smoothedCrush = this.targetCrush
     this.smoothedDamp = this.targetDamp
+    this.smoothedSpace = this.targetSpace
+    this.smoothedRepeat = this.targetRepeat
   }
 
-  // Drive (saturation) -> crush (bit reduction) -> damp (lowpass tone), each
-  // bypassed below FX_EPSILON, then the existing soft limiter. Continuous params
-  // are smoothed per sample so macro/automation moves never click.
-  private applyFx(sample: number, filter: OnePole): number {
+  // Per-channel coloration: drive (saturation) -> crush (bit reduction) ->
+  // damp (lowpass tone), each bypassed below FX_EPSILON. The stereo Space/Repeat
+  // FX and the soft limiter are applied after this, in process(). Continuous
+  // params are smoothed per sample so macro/automation moves never click.
+  private colorFx(sample: number, filter: OnePole): number {
     let value = sample
     if (this.smoothedDrive > FX_EPSILON) {
       value = softClipDrive(value, this.smoothedDrive)
@@ -263,7 +288,7 @@ export class GranularCore {
       filter.setCutoff(1 - this.smoothedDamp * (1 - DAMP_MIN_CUTOFF), 'lowpass')
       value = filter.process(value)
     }
-    return this.sanitizeSample(value)
+    return value
   }
 
   process(outputLeft: Float32Array, outputRight: Float32Array): ProcessResult {
@@ -282,6 +307,16 @@ export class GranularCore {
     let peak = 0
     let spawnedGrains = 0
 
+    // Update Space/Repeat FX coefficients once per block (cheap); the wet-mix
+    // amount itself is smoothed per sample below.
+    this.reverb.setParams({ size: 0.35 + this.targetSpace * 0.6, damp: 0.4, width: 1 })
+    this.delay.setParams({
+      timeSeconds: this.repeatTimeSeconds,
+      feedback: this.targetRepeat * 0.85,
+      tone: 0.4,
+      width: 0.7,
+    })
+
     for (let offset = 0; offset < outputLeft.length; offset += 1) {
       const absoluteFrame = this.frame + offset
       this.advanceModeTransition(absoluteFrame)
@@ -291,6 +326,8 @@ export class GranularCore {
       this.smoothedDrive += (this.targetDrive - this.smoothedDrive) * this.outputSmoothingCoefficient
       this.smoothedCrush += (this.targetCrush - this.smoothedCrush) * this.outputSmoothingCoefficient
       this.smoothedDamp += (this.targetDamp - this.smoothedDamp) * this.outputSmoothingCoefficient
+      this.smoothedSpace += (this.targetSpace - this.smoothedSpace) * this.outputSmoothingCoefficient
+      this.smoothedRepeat += (this.targetRepeat - this.smoothedRepeat) * this.outputSmoothingCoefficient
 
       if (absoluteFrame >= this.nextGrainFrame) {
         if (this.patch.mode === 'shatter') {
@@ -345,8 +382,34 @@ export class GranularCore {
       }
 
       const masterGain = this.smoothedOutputGain * this.modeTransitionGain
-      left = this.applyFx(left * masterGain, this.filterLeft)
-      right = this.applyFx(right * masterGain, this.filterRight)
+      let mixL = this.colorFx(left * masterGain, this.filterLeft)
+      let mixR = this.colorFx(right * masterGain, this.filterRight)
+
+      // Stereo Space (reverb), wet-mixed by the smoothed amount. Reset on
+      // disengage so a re-engaged reverb starts from a clean tail.
+      if (this.smoothedSpace > FX_EPSILON) {
+        this.reverb.processInto(mixL, mixR, this.fxScratch)
+        mixL += (this.fxScratch[0] - mixL) * this.smoothedSpace
+        mixR += (this.fxScratch[1] - mixR) * this.smoothedSpace
+        this.spaceActive = true
+      } else if (this.spaceActive) {
+        this.reverb.reset()
+        this.spaceActive = false
+      }
+
+      // Stereo Repeat (tempo-synced delay), same wet-mix + disengage handling.
+      if (this.smoothedRepeat > FX_EPSILON) {
+        this.delay.processInto(mixL, mixR, this.fxScratch)
+        mixL += (this.fxScratch[0] - mixL) * this.smoothedRepeat
+        mixR += (this.fxScratch[1] - mixR) * this.smoothedRepeat
+        this.repeatActive = true
+      } else if (this.repeatActive) {
+        this.delay.reset()
+        this.repeatActive = false
+      }
+
+      left = this.sanitizeSample(mixL)
+      right = this.sanitizeSample(mixR)
       outputLeft[offset] = left
       outputRight[offset] = right
       peak = Math.max(peak, Math.abs(left), Math.abs(right))
@@ -437,6 +500,9 @@ export class GranularCore {
     this.targetDrive = nextPatch.drive
     this.targetCrush = nextPatch.crush
     this.targetDamp = nextPatch.damp
+    this.targetSpace = nextPatch.space
+    this.targetRepeat = nextPatch.repeat
+    this.repeatTimeSeconds = divisionToSeconds(REPEAT_DIVISION, nextPatch.bpm)
     if (nextPatch.seed !== previousSeed) this.rng.reset(nextPatch.seed)
     if (
       forceResync

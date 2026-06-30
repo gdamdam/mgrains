@@ -47,6 +47,8 @@ export interface GrainPatch {
   drive: number
   crush: number
   damp: number
+  space: number
+  repeat: number
   seed: number
   bpm: number
   shatterDivision: ShatterDivision
@@ -83,6 +85,8 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   drive: 0,
   crush: 0,
   damp: 0,
+  space: 0,
+  repeat: 0,
   seed: 0x6d677261,
   bpm: 120,
   shatterDivision: '1/16',
@@ -104,6 +108,8 @@ export const PATCH_RANGES = Object.freeze({
   drive: [0, 1] as const,
   crush: [0, 1] as const,
   damp: [0, 1] as const,
+  space: [0, 1] as const,
+  repeat: [0, 1] as const,
   bpm: [30, 300] as const,
 })
 
@@ -123,6 +129,8 @@ export const ADVANCED_PARAM_KEYS = [
   'drive',
   'crush',
   'damp',
+  'space',
+  'repeat',
 ] as const satisfies ReadonlyArray<keyof GrainPatch>
 
 export interface EngineTelemetry {
@@ -184,6 +192,8 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
     drive: clamp(candidate.drive, ...PATCH_RANGES.drive),
     crush: clamp(candidate.crush, ...PATCH_RANGES.crush),
     damp: clamp(candidate.damp, ...PATCH_RANGES.damp),
+    space: clamp(candidate.space, ...PATCH_RANGES.space),
+    repeat: clamp(candidate.repeat, ...PATCH_RANGES.repeat),
     seed: Number.isFinite(candidate.seed) ? candidate.seed >>> 0 : DEFAULT_PATCH.seed,
     bpm: clamp(candidate.bpm, ...PATCH_RANGES.bpm),
     shatterDivision: SHATTER_DIVISIONS.includes(candidate.shatterDivision)

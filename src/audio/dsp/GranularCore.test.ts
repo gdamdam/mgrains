@@ -303,6 +303,23 @@ describe('GranularCore', () => {
     expect(render(a)).toEqual(render(b))
   })
 
+  it('applies Space (reverb) and Repeat (delay) only when engaged and stays bounded', () => {
+    const source = makeSource()
+    const dry = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    const wet = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    dry.setPatch({ ...DEFAULT_PATCH })
+    wet.setPatch({ ...DEFAULT_PATCH, space: 1, repeat: 0.8 })
+    dry.setSource(source, source)
+    wet.setSource(source, source)
+
+    const dryOut = render(dry)
+    const wetOut = render(wet)
+
+    expect(wetOut).not.toEqual(dryOut)
+    expect(wetOut.every(Number.isFinite)).toBe(true)
+    expect(Math.max(...wetOut.map(Math.abs))).toBeLessThanOrEqual(1)
+  })
+
   it('produces silence without a source', () => {
     const core = new GranularCore({ sampleRate: 48_000 })
     const left = new Float32Array(128).fill(1)
