@@ -1029,3 +1029,29 @@ footer {
 .waveform-path {
   filter: drop-shadow(0 0 3px var(--signal));
 }
+
+/* Dial control primitive */
+.dial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.dial-visual { position: relative; display: grid; place-items: center; }
+.dial-value {
+  position: absolute;
+  font: 500 0.72rem/1 var(--font-mono);
+  color: var(--text);
+}
+.dial--readout .dial-value { font-size: 1.3rem; font-weight: 400; }
+.dial-unit { color: var(--muted); font-size: 0.62em; margin-left: 2px; }
+.dial-label {
+  font: 500 0.6rem/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dial-ring-track { fill: none; stroke: var(--line); stroke-width: 2; stroke-linecap: round; }
+.dial-ring-fill { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+.dial-input:focus-visible + .dial-label,
+.dial:focus-within .dial-ring-fill { stroke: var(--signal); }
