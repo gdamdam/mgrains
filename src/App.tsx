@@ -1,9 +1,8 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AudioEngine, type AudioEngineState } from './audio/AudioEngine'
 import {
   DEFAULT_PATCH,
   resetAdvancedToDefault,
-  SHATTER_DIVISIONS,
   sanitizePatch,
   type AudioSourceMode,
   type GrainMode,
@@ -20,43 +19,13 @@ import { MotionRecorder, resolvePresetMotion, type MotionData } from './performa
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import { AbletonLinkClient, initialLinkState, type LinkState } from './transport/abletonLink'
 import { readViewMode, writeViewMode, type ViewMode } from './ui/viewMode'
-import { AdvancedControls } from './components/AdvancedControls'
-import { MacroControls } from './components/MacroControls'
-import { FxRack } from './components/fx/FxRack'
-import { ParameterControl } from './components/ParameterControl'
-import { PresetControls } from './components/PresetControls'
-import { ShatterSequencer } from './components/ShatterSequencer'
-import { Waveform } from './components/Waveform'
-import { Wordmark } from './components/Wordmark'
-import { XYPad } from './components/XYPad'
 import { LiveView } from './components/views/LiveView'
+import { StudioView } from './components/views/StudioView'
 import './styles.css'
-
-// Memoized patch-editing panels. Telemetry updates several top-level states ~30 Hz;
-// without these, the whole tree re-renders on every tick. These panels depend only
-// on `patch` + stable callbacks (not telemetry), so memo lets them skip telemetry
-// renders entirely — the largest mobile-perf win. (Waveform/meter intentionally
-// still update, since they ARE the telemetry-driven UI.)
-const FxRackMemo = memo(FxRack)
-const AdvancedControlsMemo = memo(AdvancedControls)
-const MacroControlsMemo = memo(MacroControls)
-const XYPadMemo = memo(XYPad)
-const ShatterSequencerMemo = memo(ShatterSequencer)
 
 // Wall-clock millis for preset timestamps. Kept at module scope so the call site
 // inside event handlers does not trip the react-hooks purity rule.
 const epochMs = (): number => Date.now()
-
-const MODE_COPY: Record<GrainMode, { title: string; detail: string }> = {
-  bloom: {
-    title: 'Bloom',
-    detail: 'Slow clouds, suspended detail, open air.',
-  },
-  shatter: {
-    title: 'Shatter',
-    detail: 'Tight fragments, repetition, controlled damage.',
-  },
-}
 
 const INITIAL_DEMO_PEAKS = createDemoSource(8_000).peaks
 
@@ -651,298 +620,61 @@ export default function App() {
 
   return (
     <main className={`app app--${patch.mode} view-${viewMode}`}>
-      <header className="app-header">
-        <div>
-          <h1 className="brand"><Wordmark height={26} /></h1>
-          <p className="eyebrow">granular instrument · v{__APP_VERSION__}</p>
-        </div>
-        <div className="engine-status" aria-live="polite">
-          <span className={`status-dot status-dot--${engineState}`} />
-          <span>{engineState}</span>
-          <span className="meter" aria-label={`Output peak ${Math.round(peak * 100)} percent`}>
-            <span style={{ width: `${Math.min(100, peak * 100)}%` }} />
-          </span>
-        </div>
-        <div className="source-actions">
-          <button className="file-button" type="button" onClick={toggleViewMode}>
-            ◂ Live
-          </button>
-          <label className={`file-button ${engineState !== 'running' ? 'is-disabled' : ''}`}>
-            Load file
-            <input
-              type="file"
-              accept="audio/*,.wav,.aiff,.aif,.mp3,.m4a,.ogg,.flac"
-              disabled={engineState !== 'running'}
-              onChange={(event) => void loadFile(event.currentTarget.files?.[0])}
-            />
-          </label>
-          <button
-            className="file-button"
-            type="button"
-            disabled={engineState !== 'running' || liveInputPending}
-            aria-pressed={sourceMode === 'live'}
-            onClick={() => {
-              if (sourceMode === 'live') returnToSample()
-              else void startLiveInput()
-            }}
-          >
-            {sourceMode === 'live' ? 'Use sample' : liveInputPending ? 'Enabling…' : 'Live input'}
-          </button>
-          <button
-            className={`file-button ${frozen ? 'is-active' : ''}`}
-            type="button"
-            disabled={sourceMode !== 'live' || liveBufferSeconds < 0.05}
-            aria-pressed={frozen}
-            onClick={toggleFreeze}
-          >
-            {frozen ? 'Frozen' : 'Freeze'}
-          </button>
-          <button
-            className={`file-button ${keysActive ? 'is-active' : ''}`}
-            type="button"
-            aria-pressed={keysActive}
-            onClick={() => setKeysActive((value) => !value)}
-          >
-            {keysActive ? 'Keys on' : 'Play keys'}
-          </button>
-          <button
-            className={`file-button ${linkEnabled ? 'is-active' : ''}`}
-            type="button"
-            aria-pressed={linkEnabled}
-            onClick={toggleLink}
-          >
-            {linkEnabled ? 'Link on' : 'Link'}
-          </button>
-          <button
-            className="audio-button"
-            type="button"
-            onClick={() => void startAudio()}
-            disabled={engineState === 'starting'}
-          >
-            {engineState === 'running' ? 'Reload demo' : 'Start audio'}
-          </button>
-        </div>
-      </header>
-
-      <section className="intro-row">
-        <div>
-          <h2>{MODE_COPY[patch.mode].title} it.</h2>
-          <p>{MODE_COPY[patch.mode].detail}</p>
-        </div>
-        <div className="mode-switch" aria-label="Granular mode">
-          {(['bloom', 'shatter'] as const).map((mode) => (
-            <button
-              type="button"
-              key={mode}
-              className={patch.mode === mode ? 'is-active' : ''}
-              aria-pressed={patch.mode === mode}
-              onClick={() => changeMode(mode)}
-            >
-              {MODE_COPY[mode].title}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {error && <p className="error-message" role="alert">{error}</p>}
-
-      {linkEnabled && (
-        <div className="link-strip" aria-live="polite">
-          <span className={`link-dot ${linkState.connected ? 'is-connected' : ''}`} />
-          <span>{linkState.connected ? 'Linked' : 'Searching for Link…'}</span>
-          {linkState.connected && (
-            <span>{linkState.peers} peer{linkState.peers === 1 ? '' : 's'}</span>
-          )}
-          {linkState.connected && <span>{Math.round(linkState.bpm)} BPM</span>}
-          <span className="link-hint">Run the mpump link-bridge to sync tempo.</span>
-        </div>
-      )}
-
-      <div className="patch-actions">
-        <button type="button" className="file-button" onClick={mutate}>Mutate</button>
-        <button type="button" className="file-button" onClick={undo} disabled={!canUndo}>Undo</button>
-        <span className="patch-actions-hint">Deterministic variation · Undo restores the prior patch</span>
-      </div>
-
-      <Waveform
+      <StudioView
+        patch={patch}
+        engineState={engineState}
+        peak={peak}
         peaks={peaks}
-        mode={patch.mode}
-        position={patch.position}
-        regionStart={patch.regionStart}
-        regionEnd={patch.regionEnd}
+        sourceLabel={sourceLabel}
+        sourceMode={sourceMode}
+        frozen={frozen}
+        liveBufferSeconds={liveBufferSeconds}
+        error={error}
         activeGrains={activeGrains}
-        visualGrainCount={grainVisuals.count}
-        grainPositions={grainVisuals.positions}
-        grainIntensities={grainVisuals.intensities}
-        emptyLabel={sourceMode === 'live'
-          ? `${frozen ? 'Frozen' : 'Capturing'} · ${liveBufferSeconds.toFixed(1)} of 20.0 seconds`
-          : 'Choose a source to begin'}
-        onPositionChange={(position) => updatePatch({ position })}
-      />
-
-      <div className="motion-strip">
-        <span className="motion-label">Motion · position</span>
-        <button
-          type="button"
-          className={`file-button ${motionState === 'recording' ? 'is-active' : ''}`}
-          aria-pressed={motionState === 'recording'}
-          onClick={() => (motionState === 'recording' ? finishRecording() : recordMotion())}
-        >
-          {motionState === 'recording' ? 'Stop rec' : 'Record'}
-        </button>
-        <button
-          type="button"
-          className={`file-button ${motionState === 'playing' ? 'is-active' : ''}`}
-          aria-pressed={motionState === 'playing'}
-          disabled={!hasMotion}
-          onClick={() => (motionState === 'playing' ? stopMotionPlayback() : playMotion())}
-        >
-          {motionState === 'playing' ? 'Stop' : 'Play'}
-        </button>
-        <button type="button" className="file-button" disabled={!hasMotion} onClick={clearMotion}>
-          Clear
-        </button>
-      </div>
-
-      {sourceMode === 'live' && (
-        <div className="live-strip" aria-live="polite">
-          <span className={`live-indicator ${frozen ? 'is-frozen' : ''}`} />
-          <span>{frozen ? 'Buffer frozen' : 'Capturing live input'}</span>
-          <span>{liveBufferSeconds.toFixed(1)} / 20.0 s</span>
-          <button type="button" onClick={clearLiveBuffer}>Clear buffer</button>
-          <span className="live-warning">Use headphones to prevent feedback.</span>
-        </div>
-      )}
-
-      {patch.mode === 'shatter' && (
-        <section className="shatter-workspace">
-          <div className="shatter-clock">
-            <ParameterControl
-              label="Tempo"
-              value={patch.bpm}
-              minimum={30}
-              maximum={300}
-              step={1}
-              unit="BPM"
-              decimals={0}
-              onChange={(bpm) => updatePatch({ bpm })}
-            />
-            <label className="division-control">
-              <span>Trigger division</span>
-              <strong>{patch.shatterDivision}</strong>
-              <select
-                value={patch.shatterDivision}
-                onChange={(event) => updatePatch({
-                  shatterDivision: event.currentTarget.value as GrainPatch['shatterDivision'],
-                })}
-              >
-                {SHATTER_DIVISIONS.map((division) => (
-                  <option value={division} key={division}>{division}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <ShatterSequencerMemo
-            steps={patch.shatterSteps}
-            currentStep={currentShatterStep}
-            onChange={handleShatterStepsChange}
-          />
-        </section>
-      )}
-
-      <section className="performance-grid">
-        <XYPadMemo
-          mode={patch.mode}
-          x={patch.position}
-          y={patch.spray}
-          onChange={handleXYChange}
-        />
-
-        <div className="direct-controls">
-          <div className="panel-heading">
-            <span>Grain controls</span>
-            <span>direct · always available</span>
-          </div>
-          <div className="parameter-grid">
-            <ParameterControl
-              label="Grain size"
-              value={patch.grainSizeMs}
-              minimum={5}
-              maximum={4000}
-              unit="ms"
-              scale="log"
-              decimals={0}
-              onChange={(grainSizeMs) => updatePatch({ grainSizeMs })}
-            />
-            {patch.mode === 'bloom' ? (
-              <ParameterControl
-                label="Density"
-                value={patch.densityHz}
-                minimum={0.25}
-                maximum={80}
-                unit="grains/s"
-                scale="log"
-                onChange={(densityHz) => updatePatch({ densityHz })}
-              />
-            ) : (
-              <ParameterControl
-                label="Pitch spread"
-                value={patch.pitchSpreadSemitones}
-                minimum={0}
-                maximum={24}
-                unit="st"
-                onChange={(pitchSpreadSemitones) => updatePatch({ pitchSpreadSemitones })}
-              />
-            )}
-            <ParameterControl
-              label="Position"
-              value={patch.position * 100}
-              minimum={0}
-              maximum={100}
-              unit="%"
-              decimals={0}
-              onChange={(position) => updatePatch({ position: position / 100 })}
-            />
-            <ParameterControl
-              label="Spray"
-              value={patch.spray * 100}
-              minimum={0}
-              maximum={100}
-              unit="%"
-              decimals={0}
-              onChange={(spray) => updatePatch({ spray: spray / 100 })}
-            />
-          </div>
-        </div>
-      </section>
-
-      <MacroControlsMemo
-        mode={patch.mode}
-        values={macroValues}
-        linked={linkedMacros}
-        onChange={setMacro}
-        onToggleLink={toggleMacroLink}
-      />
-
-      <FxRackMemo patch={patch} onChange={updatePatch} />
-
-      <AdvancedControlsMemo patch={patch} onChange={updatePatch} onReset={resetAdvanced} />
-
-      <PresetControls
+        grainVisuals={grainVisuals}
+        currentShatterStep={currentShatterStep}
+        macroValues={macroValues}
+        linkedMacros={linkedMacros}
         presets={presets}
         factory={FACTORY_PRESETS}
-        name={presetName}
-        onNameChange={setPresetName}
-        onSave={savePreset}
-        onLoad={loadPreset}
-        onLoadFactory={loadFactory}
-        onDelete={deletePreset}
+        presetName={presetName}
+        linkEnabled={linkEnabled}
+        linkState={linkState}
+        keysActive={keysActive}
+        canUndo={canUndo}
+        motionState={motionState}
+        hasMotion={hasMotion}
+        liveInputPending={liveInputPending}
+        onToggleView={toggleViewMode}
+        onChangeMode={changeMode}
+        onUpdatePatch={updatePatch}
+        onXYChange={handleXYChange}
+        onShatterStepsChange={handleShatterStepsChange}
+        onSetMacro={setMacro}
+        onToggleMacroLink={toggleMacroLink}
+        onResetAdvanced={resetAdvanced}
+        onMutate={mutate}
+        onUndo={undo}
+        onToggleKeys={() => setKeysActive((value) => !value)}
+        onToggleLink={toggleLink}
+        onStartAudio={() => void startAudio()}
+        onLoadFile={(file) => void loadFile(file)}
+        onLiveInput={() => void startLiveInput()}
+        onReturnToSample={returnToSample}
+        onToggleFreeze={toggleFreeze}
+        onClearLiveBuffer={clearLiveBuffer}
+        onWaveformPosition={(position) => updatePatch({ position })}
+        onRecordMotion={recordMotion}
+        onFinishRecording={finishRecording}
+        onPlayMotion={playMotion}
+        onStopMotion={stopMotionPlayback}
+        onClearMotion={clearMotion}
+        onPresetNameChange={setPresetName}
+        onSavePreset={savePreset}
+        onLoadPreset={loadPreset}
+        onLoadFactoryPreset={loadFactory}
+        onDeletePreset={deletePreset}
       />
-
-      <footer>
-        <span>Source · {sourceLabel}{sourceMode === 'live' ? ` · ${frozen ? 'frozen' : 'rolling'}` : ''}</span>
-        <span>AudioWorklet · deterministic 64-grain pool</span>
-      </footer>
     </main>
   )
 }
