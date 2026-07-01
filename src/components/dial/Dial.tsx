@@ -13,15 +13,17 @@ interface DialProps {
   onChange: (value: number) => void
   variant?: 'ring' | 'readout'
   size?: number
+  disabled?: boolean
+  ariaLabel?: string
 }
 
 export function Dial({
   label, value, minimum, maximum, step, unit, scale = 'linear',
-  decimals = 1, onChange, variant = 'ring', size = 52,
+  decimals = 1, onChange, variant = 'ring', size = 52, disabled = false, ariaLabel,
 }: DialProps) {
   const amount = toSlider(value, { minimum, maximum, scale }) / SLIDER_STEPS
   return (
-    <label className={`dial dial--${variant}`}>
+    <label className={`dial dial--${variant}${disabled ? ' dial--disabled' : ''}`}>
       <span className="dial-visual">
         <Ring amount={amount} size={variant === 'readout' ? size * 1.2 : size} />
         <span className="dial-value" aria-hidden="true">
@@ -35,8 +37,9 @@ export function Dial({
         min={0}
         max={SLIDER_STEPS}
         value={toSlider(value, { minimum, maximum, scale })}
-        aria-label={label}
+        aria-label={ariaLabel ?? label}
         aria-valuetext={`${value.toFixed(decimals)} ${unit}`.trim()}
+        disabled={disabled}
         onChange={(event) => onChange(fromSlider(Number(event.currentTarget.value), { minimum, maximum, scale, step }))}
       />
     </label>

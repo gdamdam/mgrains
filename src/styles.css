@@ -787,10 +787,6 @@ footer {
   opacity: 0.6;
 }
 
-.macro.is-unlinked .dial-input {
-  pointer-events: none;
-}
-
 .macro-head {
   display: flex;
   align-items: center;
@@ -1067,6 +1063,8 @@ footer {
 .dial-ring-fill { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
 .dial-input:focus-visible + .dial-label,
 .dial:focus-within .dial-ring-fill { stroke: var(--signal); }
+.dial--disabled { opacity: 0.6; }
+.dial--disabled .dial-ring-fill { stroke: var(--muted); }
 
 .view-live .app-header, .view-live .intro-row, .view-live .patch-actions,
 .view-live .motion-strip { display: none; } /* Live owns its own chrome */

@@ -42,14 +42,14 @@ export function MacroControls({ mode, values, linked, onChange, onToggleLink }: 
               </div>
               <Dial
                 label={macro.label}
+                ariaLabel={`${macro.label} macro`}
                 value={value}
                 minimum={0}
                 maximum={1}
                 unit=""
                 decimals={2}
-                onChange={(next) => {
-                  if (isLinked) onChange(macro.id, next)
-                }}
+                disabled={!isLinked}
+                onChange={(next) => onChange(macro.id, next)}
               />
             </div>
           )

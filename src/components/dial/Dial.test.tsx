@@ -20,5 +20,21 @@ describe('Dial', () => {
     expect(html).toContain('dial--readout')
     expect(html).toContain('aria-label="Density"')
   })
+
+  it('disabled renders the native disabled attribute and a dial--disabled modifier', () => {
+    const html = renderToStaticMarkup(
+      <Dial label="Cloud" value={0.5} minimum={0} maximum={1} unit="" onChange={() => {}} disabled />,
+    )
+    expect(html).toContain('disabled=""')
+    expect(html).toContain('dial--disabled')
+  })
+
+  it('ariaLabel overrides the default aria-label', () => {
+    const html = renderToStaticMarkup(
+      <Dial label="Cloud" value={0.5} minimum={0} maximum={1} unit="" onChange={() => {}} ariaLabel="Cloud macro" />,
+    )
+    expect(html).toContain('aria-label="Cloud macro"')
+    expect(html).not.toContain('aria-label="Cloud"')
+  })
 })
 // Value-mapping behavior (linear/log/clamp/step) is covered by sliderMapping.test.ts (Task 2).
