@@ -19,6 +19,7 @@ import { VoiceAllocator } from './instrument/voiceAllocator'
 import { MotionRecorder, resolvePresetMotion, type MotionData } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import { AbletonLinkClient, initialLinkState, type LinkState } from './transport/abletonLink'
+import { readViewMode, writeViewMode, type ViewMode } from './ui/viewMode'
 import { AdvancedControls } from './components/AdvancedControls'
 import { MacroControls } from './components/MacroControls'
 import { FxRack } from './components/fx/FxRack'
@@ -125,6 +126,14 @@ export default function App() {
   const linkEnabledRef = useRef(false)
   const [linkEnabled, setLinkEnabled] = useState(false)
   const [linkState, setLinkState] = useState<LinkState>(initialLinkState())
+  const [viewMode, setViewMode] = useState<ViewMode>(readViewMode)
+  const toggleViewMode = useCallback(() => {
+    setViewMode((current) => {
+      const next: ViewMode = current === 'live' ? 'studio' : 'live'
+      writeViewMode(next)
+      return next
+    })
+  }, [])
 
   useEffect(() => () => {
     void engineRef.current?.close()
@@ -589,7 +598,7 @@ export default function App() {
   }
 
   return (
-    <main className={`app app--${patch.mode}`}>
+    <main className={`app app--${patch.mode} view-${viewMode}`}>
       <header className="app-header">
         <div>
           <h1 className="brand"><Wordmark height={26} /></h1>
@@ -603,6 +612,9 @@ export default function App() {
           </span>
         </div>
         <div className="source-actions">
+          <button className="file-button" type="button" onClick={toggleViewMode}>
+            {viewMode === 'live' ? 'Studio ▸' : '◂ Live'}
+          </button>
           <label className={`file-button ${engineState !== 'running' ? 'is-disabled' : ''}`}>
             Load file
             <input
