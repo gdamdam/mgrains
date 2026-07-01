@@ -1,5 +1,6 @@
 import { PATCH_RANGES, type GrainPatch, type GrainWindow } from '../audio/contracts'
 import { ParameterControl } from './ParameterControl'
+import { Select } from './select/Select'
 
 const WINDOW_OPTIONS: ReadonlyArray<{ value: GrainWindow; label: string }> = [
   { value: 'hann', label: 'Smooth (Hann)' },
@@ -110,19 +111,12 @@ export function AdvancedControls({ patch, onChange, onReset }: AdvancedControlsP
             decimals={0}
             onChange={(value) => onChange({ outputGain: value / 100 })}
           />
-          <label className="parameter-control select-control">
-            <span className="parameter-label">Window</span>
-            <span className="parameter-value">{patch.window}</span>
-            <select
-              value={patch.window}
-              aria-label="Grain window"
-              onChange={(event) => onChange({ window: event.currentTarget.value as GrainWindow })}
-            >
-              {WINDOW_OPTIONS.map((option) => (
-                <option value={option.value} key={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Grain window"
+            value={patch.window}
+            options={WINDOW_OPTIONS.map((w) => ({ value: w.value, label: w.label }))}
+            onChange={(window) => onChange({ window })}
+          />
         </div>
         <button type="button" className="advanced-reset" onClick={onReset}>
           Reset advanced

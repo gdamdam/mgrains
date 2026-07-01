@@ -9,6 +9,7 @@ import { MacroControls } from '../MacroControls'
 import { FxRack } from '../fx/FxRack'
 import { ParameterControl } from '../ParameterControl'
 import { PresetControls } from '../PresetControls'
+import { Select } from '../select/Select'
 import { ShatterSequencer } from '../ShatterSequencer'
 import { Waveform } from '../Waveform'
 import { Wordmark } from '../Wordmark'
@@ -279,20 +280,12 @@ export function StudioView(props: StudioViewProps) {
               decimals={0}
               onChange={(bpm) => props.onUpdatePatch({ bpm })}
             />
-            <label className="division-control">
-              <span>Trigger division</span>
-              <strong>{patch.shatterDivision}</strong>
-              <select
-                value={patch.shatterDivision}
-                onChange={(event) => props.onUpdatePatch({
-                  shatterDivision: event.currentTarget.value as GrainPatch['shatterDivision'],
-                })}
-              >
-                {SHATTER_DIVISIONS.map((division) => (
-                  <option value={division} key={division}>{division}</option>
-                ))}
-              </select>
-            </label>
+            <Select
+              label="Trigger division"
+              value={patch.shatterDivision}
+              options={SHATTER_DIVISIONS.map((d) => ({ value: d, label: d }))}
+              onChange={(shatterDivision) => props.onUpdatePatch({ shatterDivision })}
+            />
           </div>
           <ShatterSequencerMemo
             steps={patch.shatterSteps}

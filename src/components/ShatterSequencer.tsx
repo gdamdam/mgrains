@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ShatterStep } from '../audio/contracts'
+import { Select } from './select/Select'
 
 interface ShatterSequencerProps {
   steps: ShatterStep[]
@@ -96,19 +97,14 @@ export function ShatterSequencer({ steps, currentStep, onChange }: ShatterSequen
           />
         </label>
 
-        <label className="select-control">
-          <span>Ratchet</span>
-          <select
-            value={selected.ratchet}
-            onChange={(event) => updateStep(selectedStep, {
-              ratchet: Number(event.currentTarget.value) as ShatterStep['ratchet'],
-            })}
-          >
-            {[1, 2, 3, 4].map((ratchet) => (
-              <option value={ratchet} key={ratchet}>×{ratchet}</option>
-            ))}
-          </select>
-        </label>
+        <Select
+          label="Ratchet"
+          value={String(selected.ratchet)}
+          options={[1, 2, 3, 4].map((n) => ({ value: String(n), label: `×${n}` }))}
+          onChange={(v) => updateStep(selectedStep, {
+            ratchet: Number(v) as ShatterStep['ratchet'],
+          })}
+        />
 
         <label className="reverse-control">
           <input
