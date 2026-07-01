@@ -74,6 +74,7 @@ export function LiveView(props: LiveViewProps) {
           <button type="button" className="studio-toggle" onClick={props.onToggleView}>Studio ▸</button>
         </span>
       </div>
+      <p className="live-hint">Shape FX, sequencer &amp; advanced in Studio ▸</p>
 
       <Waveform
         peaks={props.peaks} mode={patch.mode} position={patch.position}

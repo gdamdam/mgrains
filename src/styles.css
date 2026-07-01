@@ -12,7 +12,7 @@
   --panel: #0c110c;
   --panel-raised: #111811;
   --line: #1b241a;
-  --muted: #6f7a68;
+  --muted: #828e79;
   --text: #e8eadf;
   --accent: #a6e267;
   --accent-soft: #7fae5c;
@@ -963,6 +963,24 @@ footer {
   .step-lane {
     grid-template-columns: repeat(8, 1fr);
   }
+
+  .live-topbar {
+    flex-wrap: wrap;
+  }
+
+  .live-actions {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .live-perform {
+    grid-template-columns: 1fr;
+  }
+
+  .live-readouts {
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 560px) {
@@ -998,6 +1016,18 @@ footer {
   footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .live-readouts {
+    flex-direction: column;
+  }
+
+  .live-readouts .dial {
+    width: 100%;
+  }
+
+  .live-toolbar {
+    justify-content: flex-start;
   }
 }
 
@@ -1070,6 +1100,7 @@ footer {
 .view-live .motion-strip { display: none; } /* Live owns its own chrome */
 .live-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
 .live-source { color: var(--muted); font: 500 0.72rem/1 var(--font-mono); }
+.live-hint { color: var(--muted); font: 500 0.68rem/1 var(--font-mono); margin-top: 8px; }
 .live-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .studio-toggle { font: 500 0.78rem/1 var(--font-display); padding: 8px 16px; border: 1px solid var(--accent); color: var(--accent); background: rgb(166 226 103 / 0.08); border-radius: var(--radius); }
 .mode-pill { font: 600 0.62rem/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--bg); background: var(--accent); border: none; padding: 6px 12px; border-radius: 20px; }
