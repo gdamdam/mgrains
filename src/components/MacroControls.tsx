@@ -1,3 +1,4 @@
+import { Dial } from './dial/Dial'
 import { MACROS } from '../audio/macros'
 import type { GrainMode } from '../audio/contracts'
 
@@ -8,8 +9,6 @@ interface MacroControlsProps {
   onChange: (id: string, value: number) => void
   onToggleLink: (id: string) => void
 }
-
-const SLIDER_STEPS = 1000
 
 // The four performance macros for the active mode. Each macro moves a curated
 // group of grain parameters together. Link/Unlink controls takeover: a linked
@@ -41,17 +40,16 @@ export function MacroControls({ mode, values, linked, onChange, onToggleLink }: 
                   {isLinked ? 'Linked' : 'Unlinked'}
                 </button>
               </div>
-              <span className="parameter-value">
-                {Math.round(value * 100)} <span>%</span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={SLIDER_STEPS}
-                value={Math.round(value * SLIDER_STEPS)}
-                aria-label={`${macro.label} macro`}
-                disabled={!isLinked}
-                onChange={(event) => onChange(macro.id, Number(event.currentTarget.value) / SLIDER_STEPS)}
+              <Dial
+                label={macro.label}
+                value={value}
+                minimum={0}
+                maximum={1}
+                unit=""
+                decimals={2}
+                onChange={(next) => {
+                  if (isLinked) onChange(macro.id, next)
+                }}
               />
             </div>
           )

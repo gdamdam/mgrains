@@ -129,7 +129,7 @@ footer {
   align-items: center;
   gap: 9px;
   color: var(--muted);
-  font-size: 0.78rem;
+  font: 0.78rem var(--font-mono);
   text-transform: capitalize;
 }
 
@@ -142,7 +142,6 @@ footer {
 
 .status-dot--running {
   background: var(--accent);
-  box-shadow: 0 0 14px var(--accent-soft);
 }
 
 .meter {
@@ -150,6 +149,7 @@ footer {
   width: 72px;
   height: 3px;
   overflow: hidden;
+  border-radius: var(--radius);
   background: var(--line);
 }
 
@@ -165,8 +165,9 @@ footer {
 .mode-switch button {
   min-height: 44px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: transparent;
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 
@@ -241,8 +242,8 @@ button.file-button:disabled {
   display: flex;
   padding: 4px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: #101310;
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 .mode-switch button {
@@ -269,8 +270,8 @@ button.file-button:disabled {
 .xy-panel,
 .direct-controls {
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgb(20 24 20 / 84%);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 .waveform-stage {
@@ -287,13 +288,13 @@ button.file-button:disabled {
   display: block;
   width: 100%;
   min-height: 220px;
-  border-radius: 9px;
+  border-radius: var(--radius);
   cursor: crosshair;
   touch-action: none;
 }
 
 .waveform-grid {
-  fill: #0d100d;
+  fill: var(--panel-raised);
 }
 
 .region-fill {
@@ -316,14 +317,12 @@ button.file-button:disabled {
   stroke: color-mix(in srgb, var(--accent) 70%, white 18%);
   stroke-width: 1.4;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 5px var(--accent-soft));
 }
 
 .grain-marker circle {
   fill: color-mix(in srgb, var(--accent) 74%, white 16%);
   stroke: color-mix(in srgb, var(--accent) 92%, white 8%);
   stroke-width: 1;
-  filter: drop-shadow(0 0 7px var(--accent-soft));
 }
 
 .waveform-empty {
@@ -336,7 +335,6 @@ button.file-button:disabled {
 .position-line {
   stroke: var(--accent);
   stroke-width: 2;
-  filter: drop-shadow(0 0 6px var(--accent-soft));
 }
 
 .beat-line {
@@ -362,8 +360,8 @@ button.file-button:disabled {
 .shatter-sequencer {
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgb(20 24 20 / 84%);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 .shatter-clock {
@@ -386,14 +384,15 @@ button.file-button:disabled {
   gap: 14px;
   min-height: 112px;
   padding: 16px;
-  border: 1px solid #272d27;
-  border-radius: 10px;
-  background: #101310;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
 }
 
 .division-control strong {
   color: var(--accent);
   font-weight: 500;
+  font-family: var(--font-mono);
 }
 
 .division-control select {
@@ -401,8 +400,9 @@ button.file-button:disabled {
   min-height: 38px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--text);
+  font-family: var(--font-mono);
   background: var(--panel-raised);
 }
 
@@ -419,10 +419,11 @@ button.file-button:disabled {
   min-width: 0;
   min-height: 64px;
   padding: 7px 3px;
-  border: 1px solid #2d332d;
-  border-radius: 7px;
-  color: #687066;
-  background: #0e110e;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: var(--panel);
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 
@@ -439,7 +440,7 @@ button.file-button:disabled {
 .step-button.is-enabled {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
-  background: color-mix(in srgb, var(--accent) 8%, #0e110e);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
 }
 
 .step-button.is-selected {
@@ -451,7 +452,6 @@ button.file-button:disabled {
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 9px var(--accent-soft);
   content: "";
 }
 
@@ -470,10 +470,10 @@ button.file-button:disabled {
   gap: 10px;
   min-height: 72px;
   padding: 10px 12px;
-  border: 1px solid #272d27;
-  border-radius: 9px;
-  background: #101310;
-  font-size: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  font: 0.75rem var(--font-mono);
 }
 
 .step-editor-title {
@@ -485,9 +485,10 @@ button.file-button:disabled {
   min-height: 30px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius);
   color: var(--muted);
   background: transparent;
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 
@@ -501,6 +502,7 @@ button.file-button:disabled {
   color: var(--accent);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
 }
 
 .step-editor input[type="range"] {
@@ -516,8 +518,9 @@ button.file-button:disabled {
 .select-control select {
   min-height: 32px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--text);
+  font-family: var(--font-mono);
   background: var(--panel-raised);
 }
 
@@ -538,19 +541,20 @@ button.file-button:disabled {
   min-height: 48px;
   padding: 10px 16px;
   margin-top: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   color: var(--muted);
-  font-size: 0.78rem;
+  font: 0.78rem var(--font-mono);
 }
 
 .live-strip button {
   min-height: 32px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius);
   color: var(--text);
   background: transparent;
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 
@@ -559,12 +563,10 @@ button.file-button:disabled {
   height: 8px;
   border-radius: 50%;
   background: var(--danger);
-  box-shadow: 0 0 12px rgb(255 128 109 / 48%);
 }
 
 .live-indicator.is-frozen {
   background: var(--accent);
-  box-shadow: 0 0 12px var(--accent-soft);
 }
 
 .live-warning {
@@ -580,12 +582,12 @@ button.file-button:disabled {
   position: relative;
   min-height: 260px;
   overflow: hidden;
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background:
-    linear-gradient(90deg, transparent 49.8%, rgb(255 255 255 / 6%) 50%, transparent 50.2%),
-    linear-gradient(0deg, transparent 49.8%, rgb(255 255 255 / 6%) 50%, transparent 50.2%),
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 65%),
-    #0d100d;
+    linear-gradient(90deg, transparent 49.8%, var(--line) 50%, transparent 50.2%),
+    linear-gradient(0deg, transparent 49.8%, var(--line) 50%, transparent 50.2%),
+    var(--panel-raised);
   touch-action: none;
   cursor: crosshair;
 }
@@ -597,7 +599,6 @@ button.file-button:disabled {
   border: 2px solid var(--accent);
   border-radius: 50%;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
-  box-shadow: 0 0 20px var(--accent-soft);
   transform: translate(-50%, 50%);
   pointer-events: none;
 }
@@ -606,6 +607,7 @@ button.file-button:disabled {
   position: absolute;
   z-index: 1;
   color: var(--muted);
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -633,18 +635,20 @@ button.file-button:disabled {
   gap: 16px;
   min-height: 112px;
   padding: 16px;
-  border: 1px solid #272d27;
-  border-radius: 10px;
-  background: #101310;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
 }
 
 .parameter-label {
   font-weight: 650;
+  font-family: var(--font-mono);
 }
 
 .parameter-value {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
 }
 
 .parameter-value span {
@@ -677,8 +681,8 @@ footer {
 .advanced-panel {
   margin-top: 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgb(20 24 20 / 84%);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 .advanced-panel > summary {
@@ -688,6 +692,7 @@ footer {
   gap: 20px;
   padding: 16px;
   color: var(--muted);
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -733,9 +738,10 @@ footer {
   min-height: 38px;
   padding: 0 16px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius);
   color: var(--muted);
   background: transparent;
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 
@@ -748,6 +754,7 @@ footer {
 
 .patch-actions-hint {
   color: var(--muted);
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   letter-spacing: 0.04em;
 }
@@ -756,8 +763,8 @@ footer {
   margin-top: 16px;
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgb(20 24 20 / 84%);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 .macro-grid {
@@ -768,15 +775,20 @@ footer {
 
 .macro {
   display: grid;
+  justify-items: center;
   gap: 10px;
   padding: 16px;
-  border: 1px solid #272d27;
-  border-radius: 10px;
-  background: #101310;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
 }
 
 .macro.is-unlinked {
   opacity: 0.6;
+}
+
+.macro.is-unlinked .dial-input {
+  pointer-events: none;
 }
 
 .macro-head {
@@ -784,16 +796,18 @@ footer {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  width: 100%;
 }
 
 .macro-link {
   min-height: 28px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius);
   color: var(--muted);
   background: transparent;
   cursor: pointer;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
 }
 
@@ -801,11 +815,6 @@ footer {
   color: #10130e;
   border-color: var(--accent);
   background: var(--accent);
-}
-
-.macro input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
 }
 
 .motion-strip {
@@ -818,6 +827,7 @@ footer {
 .motion-label {
   margin-right: auto;
   color: var(--muted);
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -828,8 +838,8 @@ footer {
   margin-top: 16px;
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgb(20 24 20 / 84%);
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
 .preset-save {
@@ -843,8 +853,9 @@ footer {
   min-height: 40px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--text);
+  font-family: var(--font-mono);
   background: var(--panel-raised);
 }
 
@@ -862,7 +873,7 @@ footer {
   align-items: stretch;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius);
 }
 
 .preset-load {
@@ -870,6 +881,7 @@ footer {
   border: 0;
   color: var(--text);
   background: transparent;
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 
@@ -879,6 +891,7 @@ footer {
   border-left: 1px solid var(--line);
   color: var(--muted);
   background: transparent;
+  font-family: var(--font-mono);
   cursor: pointer;
 }
 
@@ -893,10 +906,10 @@ footer {
   min-height: 44px;
   padding: 8px 16px;
   margin-bottom: 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   color: var(--muted);
-  font-size: 0.78rem;
+  font: 0.78rem var(--font-mono);
 }
 
 .link-dot {
@@ -908,7 +921,6 @@ footer {
 
 .link-dot.is-connected {
   background: var(--accent);
-  box-shadow: 0 0 12px var(--accent-soft);
 }
 
 .link-hint {
