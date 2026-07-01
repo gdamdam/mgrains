@@ -12,7 +12,6 @@ export interface AudioSourceData {
 // duration that flatters its character (longer for evolving drones, shorter
 // for rhythmic material that gets chopped). Channels are decorrelated with
 // independent noise/phase so granular clouds keep stereo width.
-type DemoGenerator = (sampleRate: number) => AudioSourceData
 
 const TWO_PI = Math.PI * 2
 
@@ -220,21 +219,26 @@ function createFormantDrone(sampleRate: number): AudioSourceData {
   }
 }
 
-const GENERATORS: readonly DemoGenerator[] = [
-  createHarmonicPad,
-  createMalletPulse,
-  createFormantDrone,
+export interface DemoSource {
+  id: string
+  label: string
+  showcases: string
+  build(sampleRate: number): AudioSourceData
+}
+
+export const DEMO_SOURCES: DemoSource[] = [
+  { id: 'harmonic-pad', label: 'Warm harmonic pad', showcases: 'Bloom clouds · Space · Warmth', build: createHarmonicPad },
+  { id: 'mallet-pulse', label: 'Mallet pulse texture', showcases: 'Shatter rhythm · Repeat · Tape', build: createMalletPulse },
+  { id: 'formant-drone', label: 'Formant vocal drone', showcases: 'Formant · scan-reveals-vowels', build: createFormantDrone },
+  // Task 13 appends 7 more here.
 ]
 
-export const DEMO_VARIANT_COUNT = GENERATORS.length
-
-// Picks one of three demo textures. Pass `variant` for deterministic selection
-// (tests, reproducibility); omit it and a generator is chosen at random.
-export function createDemoSource(sampleRate: number, variant?: number): AudioSourceData {
-  const index = variant === undefined
-    ? Math.floor(Math.random() * GENERATORS.length)
-    : ((variant % GENERATORS.length) + GENERATORS.length) % GENERATORS.length
-  return GENERATORS[index](sampleRate)
+// Builds the demo source matching `id`, defaulting to the first registry
+// entry when `id` is omitted or unknown. Selection is always explicit and
+// deterministic — never random.
+export function createDemoSource(sampleRate: number, id?: string): AudioSourceData {
+  const source = (id ? DEMO_SOURCES.find((candidate) => candidate.id === id) : undefined) ?? DEMO_SOURCES[0]
+  return source.build(sampleRate)
 }
 
 export function createWaveformPeaks(

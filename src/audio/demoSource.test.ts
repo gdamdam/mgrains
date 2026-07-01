@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDemoSource, createWaveformPeaks, DEMO_VARIANT_COUNT } from './demoSource'
+import { createDemoSource, createWaveformPeaks, DEMO_SOURCES } from './demoSource'
 
 const SAMPLE_RATE = 8_000
 
@@ -25,8 +25,10 @@ function correlation(left: Float32Array, right: Float32Array): number {
 }
 
 describe('audio source utilities', () => {
-  it('exposes three demo variants', () => {
-    expect(DEMO_VARIANT_COUNT).toBe(3)
+  it('exposes three demo sources with unique ids and labels', () => {
+    expect(DEMO_SOURCES.length).toBe(3)
+    expect(new Set(DEMO_SOURCES.map((source) => source.id)).size).toBe(3)
+    expect(new Set(DEMO_SOURCES.map((source) => source.label)).size).toBe(3)
   })
 
   it('createDemoSource(sr) returns a valid source', () => {
@@ -39,29 +41,33 @@ describe('audio source utilities', () => {
     expect(source.label.length).toBeGreaterThan(0)
   })
 
-  it('selects generator i for createDemoSource(sr, i)', () => {
-    const labels = Array.from(
-      { length: DEMO_VARIANT_COUNT },
-      (_, variant) => createDemoSource(SAMPLE_RATE, variant).label,
-    )
-    expect(new Set(labels).size).toBe(DEMO_VARIANT_COUNT)
-    // Out-of-range variants wrap around to a valid generator.
-    expect(createDemoSource(SAMPLE_RATE, DEMO_VARIANT_COUNT).label).toBe(labels[0])
-    expect(createDemoSource(SAMPLE_RATE, -1).label).toBe(labels[DEMO_VARIANT_COUNT - 1])
+  it('defaults to the first registry entry, deterministically', () => {
+    const a = createDemoSource(48000)
+    const b = createDemoSource(48000)
+    expect(a.label).toBe(DEMO_SOURCES[0].label)
+    expect(Array.from(a.left.slice(0, 64))).toEqual(Array.from(b.left.slice(0, 64)))
   })
 
-  for (let variant = 0; variant < 3; variant += 1) {
-    describe(`variant ${variant}`, () => {
-      it('is deterministic for a fixed variant', () => {
-        const first = createDemoSource(SAMPLE_RATE, variant)
-        const second = createDemoSource(SAMPLE_RATE, variant)
-        expect(first.label).toBe(second.label)
+  it('selects by id', () => {
+    expect(createDemoSource(48000, 'mallet-pulse').label).toBe('Mallet pulse texture')
+  })
+
+  it('falls back to the first entry for an unknown id', () => {
+    expect(createDemoSource(SAMPLE_RATE, 'not-a-real-id').label).toBe(DEMO_SOURCES[0].label)
+  })
+
+  for (const { id } of DEMO_SOURCES) {
+    describe(`source ${id}`, () => {
+      it('is deterministic for a fixed id', () => {
+        const first = createDemoSource(SAMPLE_RATE, id)
+        const second = createDemoSource(SAMPLE_RATE, id)
+        expect(second.label).toBe(first.label)
         expect(first.left).toEqual(second.left)
         expect(first.right).toEqual(second.right)
       })
 
       it('is non-silent stereo with decorrelated channels', () => {
-        const source = createDemoSource(SAMPLE_RATE, variant)
+        const source = createDemoSource(SAMPLE_RATE, id)
         expect(maxAbs(source.left)).toBeGreaterThan(0.05)
         expect(maxAbs(source.right)).toBeGreaterThan(0.05)
         expect(source.left).not.toEqual(source.right)
@@ -70,7 +76,7 @@ describe('audio source utilities', () => {
       })
 
       it('stays within bounds and finite', () => {
-        const source = createDemoSource(SAMPLE_RATE, variant)
+        const source = createDemoSource(SAMPLE_RATE, id)
         expect(maxAbs(source.left)).toBeLessThanOrEqual(1)
         expect(maxAbs(source.right)).toBeLessThanOrEqual(1)
         expect(source.left.every(Number.isFinite)).toBe(true)
@@ -78,7 +84,7 @@ describe('audio source utilities', () => {
       })
 
       it('produces a peaks array of the expected length', () => {
-        const source = createDemoSource(SAMPLE_RATE, variant)
+        const source = createDemoSource(SAMPLE_RATE, id)
         expect(source.peaks.length).toBe(320)
         expect(source.peaks.every(Number.isFinite)).toBe(true)
       })
