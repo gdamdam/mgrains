@@ -1,8 +1,10 @@
 import { memo } from 'react'
 import { MacroControls } from '../MacroControls'
+import { Select } from '../select/Select'
 import { Waveform } from '../Waveform'
 import { XYPad } from '../XYPad'
 import { Dial } from '../dial/Dial'
+import { DEMO_SOURCES } from '../../audio/demoSource'
 import type { GrainMode, GrainPatch } from '../../audio/contracts'
 
 // Preserve App's perf boundary: this view re-renders on ~30 Hz telemetry (peak,
@@ -19,6 +21,7 @@ interface LiveViewProps {
   peaks: Float32Array | null
   sourceLabel: string
   sourceMode: 'sample' | 'live'
+  sourceId: string
   frozen: boolean
   liveBufferSeconds: number
   activeGrains: number
@@ -38,7 +41,7 @@ interface LiveViewProps {
   onToggleMacroLink: (id: string) => void
   onToggleKeys: () => void
   onToggleLink: () => void
-  onSource: () => void
+  onSelectSource: (id: string) => void
   onWaveformPosition: (position: number) => void
   onRecordMotion: () => void
   onFinishRecording: () => void
@@ -70,7 +73,9 @@ export function LiveView(props: LiveViewProps) {
         <span className="live-actions">
           <button type="button" className={`file-button ${props.keysActive ? 'is-active' : ''}`} onClick={props.onToggleKeys}>Keys</button>
           <button type="button" className={`file-button ${props.linkEnabled ? 'is-active' : ''}`} onClick={props.onToggleLink}>Link</button>
-          <button type="button" className="file-button" onClick={props.onSource}>Source</button>
+          <Select label="Source" value={props.sourceId}
+            options={DEMO_SOURCES.map((s) => ({ value: s.id, label: s.label }))}
+            onChange={props.onSelectSource} />
           <button type="button" className="studio-toggle" onClick={props.onToggleView}>Studio ▸</button>
         </span>
       </div>

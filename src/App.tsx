@@ -53,6 +53,7 @@ export default function App() {
     peaks: INITIAL_DEMO_PEAKS,
   })
   const [sourceMode, setSourceMode] = useState<AudioSourceMode>('sample')
+  const [sourceId, setSourceId] = useState('harmonic-pad')
   const [frozen, setFrozen] = useState(false)
   const [liveBufferSeconds, setLiveBufferSeconds] = useState(0)
   // Guards against firing a second getUserMedia() while one is in flight (rapid
@@ -469,6 +470,7 @@ export default function App() {
       // reload (already running) generates and loads the demo source.
       if (status === 'resumed') return
       const source = createDemoSource(engine.sampleRate ?? 48_000)
+      setSourceId('harmonic-pad')
       setPeaks(source.peaks)
       setSourceLabel(source.label)
       setSampleView({ label: source.label, peaks: source.peaks })
@@ -508,6 +510,7 @@ export default function App() {
   const returnToSample = () => {
     engineRef.current?.useSampleSource()
     setSourceMode('sample')
+    setSourceId('harmonic-pad')
     setFrozen(false)
     setPeaks(sampleView.peaks)
     setSourceLabel(sampleView.label)
@@ -567,13 +570,21 @@ export default function App() {
       : { mode, grainSizeMs: Math.min(58, patch.grainSizeMs), densityHz: 24, timingJitter: 0.015 })
   }
 
-  // Live view's single "Source" button stands in for the studio header's separate
-  // Load file / Live input controls (Task 14 replaces this with a proper picker).
-  // Minimal behavior: toggle live input on/off, mirroring the existing button.
-  const handleSource = () => {
-    if (sourceMode === 'live') returnToSample()
-    else void startLiveInput()
-  }
+  // Loads a curated demo source by id from the Source dropdown (both views).
+  // Only meaningful while the engine is running; otherwise there's nothing to
+  // push the source into.
+  const onSelectSource = useCallback((id: string) => {
+    const engine = engineRef.current
+    if (!engine || engineState !== 'running') return
+    const source = createDemoSource(engine.sampleRate ?? 48_000, id)
+    engine.setSource(source)
+    setSourceId(id)
+    setPeaks(source.peaks)
+    setSourceLabel(source.label)
+    setSampleView({ label: source.label, peaks: source.peaks })
+    setSourceMode('sample')
+    setFrozen(false)
+  }, [engineState])
 
   if (viewMode === 'live') {
     return (
@@ -585,6 +596,7 @@ export default function App() {
           peaks={peaks}
           sourceLabel={sourceLabel}
           sourceMode={sourceMode}
+          sourceId={sourceId}
           frozen={frozen}
           liveBufferSeconds={liveBufferSeconds}
           activeGrains={activeGrains}
@@ -604,7 +616,7 @@ export default function App() {
           onToggleMacroLink={toggleMacroLink}
           onToggleKeys={() => setKeysActive((value) => !value)}
           onToggleLink={toggleLink}
-          onSource={handleSource}
+          onSelectSource={onSelectSource}
           onWaveformPosition={(position) => updatePatch({ position })}
           onRecordMotion={recordMotion}
           onFinishRecording={finishRecording}
@@ -627,6 +639,7 @@ export default function App() {
         peaks={peaks}
         sourceLabel={sourceLabel}
         sourceMode={sourceMode}
+        sourceId={sourceId}
         frozen={frozen}
         liveBufferSeconds={liveBufferSeconds}
         error={error}
@@ -661,6 +674,7 @@ export default function App() {
         onLoadFile={(file) => void loadFile(file)}
         onLiveInput={() => void startLiveInput()}
         onReturnToSample={returnToSample}
+        onSelectSource={onSelectSource}
         onToggleFreeze={toggleFreeze}
         onClearLiveBuffer={clearLiveBuffer}
         onWaveformPosition={(position) => updatePatch({ position })}

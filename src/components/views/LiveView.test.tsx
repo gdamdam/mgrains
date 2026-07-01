@@ -6,12 +6,12 @@ import { DEFAULT_PATCH } from '../../audio/contracts'
 const noop = () => {}
 export const baseProps = {
   patch: DEFAULT_PATCH, engineState: 'running' as const, peak: 0, peaks: null,
-  sourceLabel: 'Tone field', sourceMode: 'sample' as const, frozen: false, liveBufferSeconds: 0,
+  sourceLabel: 'Tone field', sourceMode: 'sample' as const, sourceId: 'harmonic-pad', frozen: false, liveBufferSeconds: 0,
   activeGrains: 0, grainVisuals: { count: 0, positions: new Float32Array(0), intensities: new Float32Array(0) },
   macroValues: {}, linkedMacros: {}, keysActive: false, linkEnabled: false,
   motionState: 'idle' as const, hasMotion: false, canUndo: false,
   onToggleView: noop, onChangeMode: noop, onUpdatePatch: noop, onXYChange: noop, onSetMacro: noop,
-  onToggleMacroLink: noop, onToggleKeys: noop, onToggleLink: noop, onSource: noop, onWaveformPosition: noop,
+  onToggleMacroLink: noop, onToggleKeys: noop, onToggleLink: noop, onSelectSource: noop, onWaveformPosition: noop,
   onRecordMotion: noop, onFinishRecording: noop, onPlayMotion: noop, onStopMotion: noop, onClearMotion: noop,
   onMutate: noop, onUndo: noop,
 }
@@ -25,5 +25,6 @@ describe('LiveView', () => {
     expect(html).not.toContain('fx-bar')          // no FX rack
     expect(html).not.toContain('advanced-panel')  // no advanced panel
     expect(html).not.toContain('preset-controls') // no presets
+    expect(html).toContain('role="combobox"')     // the Source picker trigger
   })
 })

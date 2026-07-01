@@ -15,6 +15,7 @@ import { Waveform } from '../Waveform'
 import { Wordmark } from '../Wordmark'
 import { XYPad } from '../XYPad'
 import { Dial } from '../dial/Dial'
+import { DEMO_SOURCES } from '../../audio/demoSource'
 
 // Memoized patch-editing panels. Telemetry updates several top-level states ~30 Hz;
 // without these, the whole tree re-renders on every tick. These panels depend only
@@ -51,6 +52,7 @@ interface StudioViewProps {
   peaks: Float32Array | null
   sourceLabel: string
   sourceMode: AudioSourceMode
+  sourceId: string
   frozen: boolean
   liveBufferSeconds: number
   error: string | null
@@ -85,6 +87,7 @@ interface StudioViewProps {
   onLoadFile: (file: File | undefined) => void
   onLiveInput: () => void
   onReturnToSample: () => void
+  onSelectSource: (id: string) => void
   onToggleFreeze: () => void
   onClearLiveBuffer: () => void
   onWaveformPosition: (position: number) => void
@@ -120,6 +123,9 @@ export function StudioView(props: StudioViewProps) {
           <button className="file-button" type="button" onClick={props.onToggleView}>
             ◂ Live
           </button>
+          <Select label="Source" value={props.sourceId}
+            options={DEMO_SOURCES.map((s) => ({ value: s.id, label: s.label }))}
+            onChange={props.onSelectSource} />
           <label className={`file-button ${props.engineState !== 'running' ? 'is-disabled' : ''}`}>
             Load file
             <input
