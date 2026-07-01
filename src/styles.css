@@ -20,7 +20,6 @@
   --danger: #ff806d;
 
   --radius: 3px;
-  --scanline-alpha: 0.22;
 }
 
 * {
@@ -1047,22 +1046,6 @@ footer {
   }
 }
 
-/* Faint CRT scanlines over the whole app. Static (no animation), so it is
-   kept under reduced-motion; alpha tuned to never drop text below AA. */
-.app::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 50;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent 0 2px,
-    rgb(0 0 0 / var(--scanline-alpha)) 2px 3px
-  );
-  mix-blend-mode: multiply;
-}
-
 /* Glow is reserved for the signal display only. */
 .waveform-path {
   filter: drop-shadow(0 0 3px var(--signal));
@@ -1075,7 +1058,7 @@ footer {
   align-items: center;
   gap: 6px;
 }
-.dial-visual { position: relative; display: grid; place-items: center; }
+.dial-visual { position: relative; display: grid; place-items: center; cursor: ns-resize; touch-action: none; user-select: none; }
 .dial-value {
   position: absolute;
   font: 500 0.72rem/1 var(--font-mono);
@@ -1094,6 +1077,7 @@ footer {
 .dial-input:focus-visible + .dial-label,
 .dial:focus-within .dial-ring-fill { stroke: var(--signal); }
 .dial--disabled { opacity: 0.6; }
+.dial--disabled .dial-visual { cursor: default; }
 .dial--disabled .dial-ring-fill { stroke: var(--muted); }
 
 .view-live .app-header, .view-live .intro-row, .view-live .patch-actions,
