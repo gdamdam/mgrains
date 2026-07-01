@@ -29,6 +29,7 @@ import { ShatterSequencer } from './components/ShatterSequencer'
 import { Waveform } from './components/Waveform'
 import { Wordmark } from './components/Wordmark'
 import { XYPad } from './components/XYPad'
+import { LiveView } from './components/views/LiveView'
 import './styles.css'
 
 // Memoized patch-editing panels. Telemetry updates several top-level states ~30 Hz;
@@ -597,6 +598,57 @@ export default function App() {
       : { mode, grainSizeMs: Math.min(58, patch.grainSizeMs), densityHz: 24, timingJitter: 0.015 })
   }
 
+  // Live view's single "Source" button stands in for the studio header's separate
+  // Load file / Live input controls (Task 14 replaces this with a proper picker).
+  // Minimal behavior: toggle live input on/off, mirroring the existing button.
+  const handleSource = () => {
+    if (sourceMode === 'live') returnToSample()
+    else void startLiveInput()
+  }
+
+  if (viewMode === 'live') {
+    return (
+      <main className={`app app--${patch.mode} view-${viewMode}`}>
+        <LiveView
+          patch={patch}
+          engineState={engineState}
+          peak={peak}
+          peaks={peaks}
+          sourceLabel={sourceLabel}
+          sourceMode={sourceMode}
+          frozen={frozen}
+          liveBufferSeconds={liveBufferSeconds}
+          activeGrains={activeGrains}
+          grainVisuals={grainVisuals}
+          macroValues={macroValues}
+          linkedMacros={linkedMacros}
+          keysActive={keysActive}
+          linkEnabled={linkEnabled}
+          motionState={motionState}
+          hasMotion={hasMotion}
+          canUndo={canUndo}
+          onToggleView={toggleViewMode}
+          onChangeMode={changeMode}
+          onUpdatePatch={updatePatch}
+          onXYChange={handleXYChange}
+          onSetMacro={setMacro}
+          onToggleMacroLink={toggleMacroLink}
+          onToggleKeys={() => setKeysActive((value) => !value)}
+          onToggleLink={toggleLink}
+          onSource={handleSource}
+          onWaveformPosition={(position) => updatePatch({ position })}
+          onRecordMotion={recordMotion}
+          onFinishRecording={finishRecording}
+          onPlayMotion={playMotion}
+          onStopMotion={stopMotionPlayback}
+          onClearMotion={clearMotion}
+          onMutate={mutate}
+          onUndo={undo}
+        />
+      </main>
+    )
+  }
+
   return (
     <main className={`app app--${patch.mode} view-${viewMode}`}>
       <header className="app-header">
@@ -613,7 +665,7 @@ export default function App() {
         </div>
         <div className="source-actions">
           <button className="file-button" type="button" onClick={toggleViewMode}>
-            {viewMode === 'live' ? 'Studio ▸' : '◂ Live'}
+            ◂ Live
           </button>
           <label className={`file-button ${engineState !== 'running' ? 'is-disabled' : ''}`}>
             Load file
