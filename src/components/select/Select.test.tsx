@@ -15,5 +15,13 @@ describe('Select', () => {
     const html = renderToStaticMarkup(<Select label="Pick" value="a" options={opts} onChange={() => {}} />)
     expect(html).not.toContain('role="listbox"')
   })
+  it('renders an empty trigger label when value matches no option', () => {
+    const html = renderToStaticMarkup(
+      <Select label="Pick" value={'missing' as 'a' | 'b'} options={opts} onChange={() => {}} />
+    )
+    expect(html).toContain('role="combobox"')
+    expect(html).not.toContain('Alpha')
+    expect(html).not.toContain('Beta')
+  })
 })
 // Open/select/Escape is interaction; its logic lives in nextActiveIndex (tested above) + the final manual pass.
