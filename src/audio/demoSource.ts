@@ -219,6 +219,351 @@ function createFormantDrone(sampleRate: number): AudioSourceData {
   }
 }
 
+// Wraps a finished stereo channel pair into an AudioSourceData, computing
+// peaks once so every generator shares the same finalisation step.
+function finalizeStereo(
+  left: Float32Array,
+  right: Float32Array,
+  label: string,
+  durationSeconds: number,
+): AudioSourceData {
+  return { label, left, right, peaks: createWaveformPeaks(left, right), durationSeconds }
+}
+
+// Sums a fixed set of sine partials, each with its own per-partial exponential
+// decay envelope (or none, for a sustained partial), plus a small seeded
+// stereo detune/phase spread so the result has width without needing an
+// explicit noise layer. Generalises the partial-summing technique in
+// createHarmonicPad / createGlassBells.
+function additivePartials(
+  sampleRate: number,
+  durationSeconds: number,
+  partials: { freq: number; amp: number; decay?: number; detuneCents?: number }[],
+  seed: number,
+): { left: Float32Array; right: Float32Array } {
+  const length = Math.floor(sampleRate * durationSeconds)
+  const left = new Float32Array(length)
+  const right = new Float32Array(length)
+  const rng = new XorShift32(seed)
+
+  const voices = partials.map((partial) => {
+    const detuneCents = partial.detuneCents ?? rng.nextBipolar() * 4
+    const detuneRatio = 2 ** (detuneCents / 1200)
+    return {
+      ...partial,
+      freqLeft: partial.freq * detuneRatio,
+      freqRight: partial.freq / detuneRatio,
+      phase: rng.nextFloat() * TWO_PI,
+    }
+  })
+
+  for (let index = 0; index < length; index += 1) {
+    const time = index / sampleRate
+    let sampleLeft = 0
+    let sampleRight = 0
+    for (const voice of voices) {
+      const envelope = voice.decay !== undefined ? Math.exp(-time * voice.decay) : 1
+      const level = voice.amp * envelope
+      sampleLeft += Math.sin(TWO_PI * voice.freqLeft * time + voice.phase) * level
+      sampleRight += Math.sin(TWO_PI * voice.freqRight * time + voice.phase) * level
+    }
+    left[index] = softClip(sampleLeft)
+    right[index] = softClip(sampleRight)
+  }
+
+  return { left, right }
+}
+
+// Seeded white noise pushed through a one-pole band-pass (difference of two
+// leaky integrators) whose centre frequency moves over time per `centreHz`.
+// Generalises the moving-formant band-pass technique in createFormantDrone.
+function filteredNoise(
+  sampleRate: number,
+  durationSeconds: number,
+  centreHz: (time: number) => number,
+  q: number,
+  seed: number,
+): { left: Float32Array; right: Float32Array } {
+  const length = Math.floor(sampleRate * durationSeconds)
+  const left = new Float32Array(length)
+  const right = new Float32Array(length)
+  const rng = new XorShift32(seed)
+
+  let lowLeftA = 0
+  let lowLeftB = 0
+  let lowRightA = 0
+  let lowRightB = 0
+
+  for (let index = 0; index < length; index += 1) {
+    const time = index / sampleRate
+    const centre = centreHz(time)
+    const bandwidth = centre / q
+    const coeffA = Math.exp((-TWO_PI * (centre - bandwidth / 2)) / sampleRate)
+    const coeffB = Math.exp((-TWO_PI * (centre + bandwidth / 2)) / sampleRate)
+
+    const noiseLeft = rng.nextBipolar()
+    const noiseRight = rng.nextBipolar()
+
+    lowLeftA = noiseLeft * (1 - coeffA) + lowLeftA * coeffA
+    lowLeftB = noiseLeft * (1 - coeffB) + lowLeftB * coeffB
+    lowRightA = noiseRight * (1 - coeffA) + lowRightA * coeffA
+    lowRightB = noiseRight * (1 - coeffB) + lowRightB * coeffB
+
+    left[index] = softClip((lowLeftA - lowLeftB) * q * 2)
+    right[index] = softClip((lowRightA - lowRightB) * q * 2)
+  }
+
+  return { left, right }
+}
+
+// One-pole band-pass formant filter (difference of two leaky integrators)
+// applied to an existing signal, with the centre frequency swept by
+// `centreHz(time)`. Extracted from createFormantDrone so createVowelChoir can
+// reuse the same formant-shaping technique on a harmonic source instead of
+// noise.
+function formantFilter(
+  input: Float32Array,
+  sampleRate: number,
+  centreHz: (time: number) => number,
+  q: number,
+): Float32Array {
+  const output = new Float32Array(input.length)
+  let lowA = 0
+  let lowB = 0
+  for (let index = 0; index < input.length; index += 1) {
+    const time = index / sampleRate
+    const centre = centreHz(time)
+    const bandwidth = centre / q
+    const coeffA = Math.exp((-TWO_PI * (centre - bandwidth / 2)) / sampleRate)
+    const coeffB = Math.exp((-TWO_PI * (centre + bandwidth / 2)) / sampleRate)
+    const sample = input[index]
+    lowA = sample * (1 - coeffA) + lowA * coeffA
+    lowB = sample * (1 - coeffB) + lowB * coeffB
+    output[index] = (lowA - lowB) * q * 2
+  }
+  return output
+}
+
+// A steady train of decaying pitched clicks (two-partial percussive envelope,
+// as in createMalletPulse) fired at `rateHz`, with small seeded timing/level
+// jitter so the sequence feels played rather than mechanically identical.
+function transientTrain(
+  sampleRate: number,
+  durationSeconds: number,
+  rateHz: number,
+  pitchHz: number,
+  seed: number,
+): { left: Float32Array; right: Float32Array } {
+  const length = Math.floor(sampleRate * durationSeconds)
+  const left = new Float32Array(length)
+  const right = new Float32Array(length)
+  const rng = new XorShift32(seed)
+
+  const interval = 1 / rateHz
+  const hitCount = Math.ceil(durationSeconds * rateHz)
+  const hits = Array.from({ length: hitCount }, (_, hit) => ({
+    start: hit * interval + rng.nextBipolar() * 0.002,
+    pan: rng.nextFloat(),
+    amplitude: 0.75 + rng.nextFloat() * 0.25,
+  }))
+
+  for (let index = 0; index < length; index += 1) {
+    const time = index / sampleRate
+    let mono = 0
+    let panAccum = 0
+    let weight = 0
+    for (const hit of hits) {
+      const since = time - hit.start
+      if (since < 0 || since > 0.25) continue
+      const attack = 1 - Math.exp(-since * 2000)
+      const decay = Math.exp(-since * 45)
+      const envelope = attack * decay * hit.amplitude
+      if (envelope < 0.0005) continue
+      const tone = Math.sin(TWO_PI * pitchHz * since) + Math.sin(TWO_PI * pitchHz * 2.4 * since) * 0.3
+      const voice = tone * envelope
+      mono += voice
+      panAccum += hit.pan * Math.abs(voice)
+      weight += Math.abs(voice)
+    }
+    const pan = weight > 0 ? panAccum / weight : 0.5
+    left[index] = softClip(mono * (1 - pan))
+    right[index] = softClip(mono * pan)
+  }
+
+  return { left, right }
+}
+
+// 4. Bell-like inharmonic partials with independent exponential decays — a
+//    classic FM/additive bell spectrum, showcasing pitched comb/ring effects.
+function createGlassBells(sampleRate: number): AudioSourceData {
+  const dur = 7
+  const { left, right } = additivePartials(sampleRate, dur, [
+    { freq: 220, amp: 0.5, decay: 2.2 },
+    { freq: 220 * 2.76, amp: 0.32, decay: 1.6 }, // inharmonic bell ratios
+    { freq: 220 * 5.4, amp: 0.2, decay: 1.1 },
+    { freq: 220 * 8.93, amp: 0.12, decay: 0.8 },
+  ], 0x6265_6c6c)
+  return finalizeStereo(left, right, 'Glass bell partials', dur)
+}
+
+// 5. Slow sub-bass swell: a few low partials whose combined amplitude breathes
+//    at 0.12 Hz, showcasing sub-heavy drive/bloom processing.
+function createSubSwell(sampleRate: number): AudioSourceData {
+  const dur = 8
+  const { left: rawLeft, right: rawRight } = additivePartials(sampleRate, dur, [
+    { freq: 55, amp: 0.6 },
+    { freq: 110, amp: 0.2 },
+    { freq: 27.5, amp: 0.3 },
+  ], 0x5355_4221)
+
+  const length = rawLeft.length
+  const left = new Float32Array(length)
+  const right = new Float32Array(length)
+  for (let index = 0; index < length; index += 1) {
+    const time = index / sampleRate
+    const swell = 0.5 + 0.5 * Math.sin(TWO_PI * 0.12 * time)
+    left[index] = rawLeft[index] * swell
+    right[index] = rawRight[index] * swell
+  }
+  return finalizeStereo(left, right, 'Sub bass swell', dur)
+}
+
+// 6. Three detuned vocal-harmonic voices swept through ah -> ee -> oh formant
+//    positions, showcasing formant filtering and bloom stretch.
+function createVowelChoir(sampleRate: number): AudioSourceData {
+  const dur = 8
+  const length = Math.floor(sampleRate * dur)
+  const rng = new XorShift32(0x564f_4943)
+
+  const fundamental = 130
+  const detunes = [-7, 0, 7]
+  const mixedLeft = new Float32Array(length)
+  const mixedRight = new Float32Array(length)
+
+  for (const detuneCents of detunes) {
+    const partials = Array.from({ length: 12 }, (_, harmonic) => {
+      const ratio = harmonic + 1
+      return { freq: fundamental * ratio, amp: 0.5 / ratio, detuneCents }
+    })
+    const { left, right } = additivePartials(sampleRate, dur, partials, rng.nextUint())
+    for (let index = 0; index < length; index += 1) {
+      mixedLeft[index] += left[index]
+      mixedRight[index] += right[index]
+    }
+  }
+
+  // Sweep the formant centre through ah -> ee -> oh across the buffer.
+  const vowelCentres = [700, 2200, 550] // ah, ee, oh (approx first-formant-ish)
+  const centreHz = (time: number): number => {
+    const phase = (time / dur) * (vowelCentres.length - 1)
+    const segment = Math.min(Math.floor(phase), vowelCentres.length - 2)
+    const frac = phase - segment
+    return vowelCentres[segment] + (vowelCentres[segment + 1] - vowelCentres[segment]) * frac
+  }
+
+  const left = formantFilter(mixedLeft, sampleRate, centreHz, 3)
+  const right = formantFilter(mixedRight, sampleRate, centreHz, 3)
+  const scaledLeft = new Float32Array(length)
+  const scaledRight = new Float32Array(length)
+  for (let index = 0; index < length; index += 1) {
+    scaledLeft[index] = softClip(left[index] * 0.5)
+    scaledRight[index] = softClip(right[index] * 0.5)
+  }
+  return finalizeStereo(scaledLeft, scaledRight, 'Vowel-morph choir', dur)
+}
+
+// 7. A steady clave-like click sequence at ~120 BPM 1/16 spacing, showcasing
+//    Shatter sequencing, gating, and repeat.
+function createClaveSeq(sampleRate: number): AudioSourceData {
+  const dur = 6
+  const { left, right } = transientTrain(sampleRate, dur, 8, 2000, 0x434c_4156)
+  return finalizeStereo(left, right, 'Clave click sequence', dur)
+}
+
+// 8. Band-passed noise whose centre frequency drifts slowly across the
+//    spectrum, showcasing spray/damp/wow/crush processing.
+function createNoiseBed(sampleRate: number): AudioSourceData {
+  const dur = 8
+  const { left, right } = filteredNoise(
+    sampleRate,
+    dur,
+    (t) => 300 + 2700 * (0.5 + 0.5 * Math.sin(TWO_PI * 0.08 * t)),
+    2,
+    0x4e4f_4953,
+  )
+  return finalizeStereo(left, right, 'Evolving noise bed', dur)
+}
+
+// 9. Three detuned sawtooth-like harmonic stacks (built additively), showcasing
+//    drive/comb/pitch-spread processing.
+function createSawStack(sampleRate: number): AudioSourceData {
+  const dur = 8
+  const length = Math.floor(sampleRate * dur)
+  const rng = new XorShift32(0x5341_5721)
+  const fundamental = 110
+  const detunes = [-6, 0, 6]
+  const mixedLeft = new Float32Array(length)
+  const mixedRight = new Float32Array(length)
+
+  for (const detuneCents of detunes) {
+    const partials = Array.from({ length: 14 }, (_, harmonic) => {
+      const ratio = harmonic + 1
+      return { freq: fundamental * ratio, amp: 0.4 / ratio, detuneCents }
+    })
+    const { left, right } = additivePartials(sampleRate, dur, partials, rng.nextUint())
+    for (let index = 0; index < length; index += 1) {
+      mixedLeft[index] += left[index]
+      mixedRight[index] += right[index]
+    }
+  }
+
+  const left = new Float32Array(length)
+  const right = new Float32Array(length)
+  for (let index = 0; index < length; index += 1) {
+    left[index] = softClip(mixedLeft[index] * 0.5)
+    right[index] = softClip(mixedRight[index] * 0.5)
+  }
+  return finalizeStereo(left, right, 'Detuned saw stack', dur)
+}
+
+// 10. Six partials whose frequencies rise linearly over the buffer, showcasing
+//     position/scan, wow, and bloom processing.
+function createChirpSweep(sampleRate: number): AudioSourceData {
+  const dur = 8
+  const length = Math.floor(sampleRate * dur)
+  const left = new Float32Array(length)
+  const right = new Float32Array(length)
+  const rng = new XorShift32(0x4348_5250)
+
+  const partialCount = 6
+  const baseStart = 120
+  const baseEnd = 900
+  const voices = Array.from({ length: partialCount }, (_, index) => {
+    const ratio = index + 1
+    const detuneRatio = 2 ** ((rng.nextBipolar() * 4) / 1200)
+    return { ratio, detuneRatio, phase: rng.nextFloat() * TWO_PI }
+  })
+
+  for (let index = 0; index < length; index += 1) {
+    const time = index / sampleRate
+    let sampleLeft = 0
+    let sampleRight = 0
+    for (const voice of voices) {
+      // Phase = integral of frequency over time for a linear chirp: since freq
+      // is linear in time, integral is base*t + slope*t^2/2.
+      const slope = ((baseEnd - baseStart) / dur) * voice.ratio
+      const baseFreq = baseStart * voice.ratio
+      const phaseAccum = TWO_PI * (baseFreq * time + (slope * time * time) / 2)
+      sampleLeft += Math.sin(phaseAccum * voice.detuneRatio + voice.phase) * 0.25
+      sampleRight += Math.sin(phaseAccum / voice.detuneRatio + voice.phase) * 0.25
+    }
+    left[index] = softClip(sampleLeft)
+    right[index] = softClip(sampleRight)
+  }
+
+  return finalizeStereo(left, right, 'Spectral chirp sweep', dur)
+}
+
 export interface DemoSource {
   id: string
   label: string
@@ -230,15 +575,23 @@ export const DEMO_SOURCES: DemoSource[] = [
   { id: 'harmonic-pad', label: 'Warm harmonic pad', showcases: 'Bloom clouds · Space · Warmth', build: createHarmonicPad },
   { id: 'mallet-pulse', label: 'Mallet pulse texture', showcases: 'Shatter rhythm · Repeat · Tape', build: createMalletPulse },
   { id: 'formant-drone', label: 'Formant vocal drone', showcases: 'Formant · scan-reveals-vowels', build: createFormantDrone },
-  // Task 13 appends 7 more here.
+  { id: 'glass-bells', label: 'Glass bell partials', showcases: 'Ring · Comb · Pitch spread', build: createGlassBells },
+  { id: 'sub-swell', label: 'Sub bass swell', showcases: 'Sub · Drive · Bloom drone', build: createSubSwell },
+  { id: 'vowel-choir', label: 'Vowel-morph choir', showcases: 'Formant · Bloom stretch · Position', build: createVowelChoir },
+  { id: 'clave-seq', label: 'Clave click sequence', showcases: 'Shatter seq · gate · Repeat', build: createClaveSeq },
+  { id: 'noise-bed', label: 'Evolving noise bed', showcases: 'Spray · Damp · Wow · Crush', build: createNoiseBed },
+  { id: 'saw-stack', label: 'Detuned saw stack', showcases: 'Drive · Comb · Pitch spread', build: createSawStack },
+  { id: 'chirp-sweep', label: 'Spectral chirp sweep', showcases: 'Position/Scan · Wow · Bloom', build: createChirpSweep },
 ]
 
 // Builds the demo source matching `id`, defaulting to the first registry
 // entry when `id` is omitted or unknown. Selection is always explicit and
-// deterministic — never random.
+// deterministic — never random. The registry entry's `label` is authoritative
+// so the dropdown label always matches the loaded source, even if a build fn
+// sets its own internal label.
 export function createDemoSource(sampleRate: number, id?: string): AudioSourceData {
-  const source = (id ? DEMO_SOURCES.find((candidate) => candidate.id === id) : undefined) ?? DEMO_SOURCES[0]
-  return source.build(sampleRate)
+  const entry = (id ? DEMO_SOURCES.find((candidate) => candidate.id === id) : undefined) ?? DEMO_SOURCES[0]
+  return { ...entry.build(sampleRate), label: entry.label }
 }
 
 export function createWaveformPeaks(

@@ -25,10 +25,10 @@ function correlation(left: Float32Array, right: Float32Array): number {
 }
 
 describe('audio source utilities', () => {
-  it('exposes three demo sources with unique ids and labels', () => {
-    expect(DEMO_SOURCES.length).toBe(3)
-    expect(new Set(DEMO_SOURCES.map((source) => source.id)).size).toBe(3)
-    expect(new Set(DEMO_SOURCES.map((source) => source.label)).size).toBe(3)
+  it('exposes ten demo sources with unique ids and labels', () => {
+    expect(DEMO_SOURCES.length).toBe(10)
+    expect(new Set(DEMO_SOURCES.map((source) => source.id)).size).toBe(10)
+    expect(new Set(DEMO_SOURCES.map((source) => source.label)).size).toBe(10)
   })
 
   it('createDemoSource(sr) returns a valid source', () => {
@@ -98,5 +98,34 @@ describe('audio source utilities', () => {
 
     expect([...peaks]).toEqual([0.5, 1])
     expect(peaks.every(Number.isFinite)).toBe(true)
+  })
+})
+
+describe('curated source registry (10)', () => {
+  it('has 10 sources with unique ids', () => {
+    expect(DEMO_SOURCES).toHaveLength(10)
+    expect(new Set(DEMO_SOURCES.map((s) => s.id)).size).toBe(10)
+  })
+
+  it.each(DEMO_SOURCES.map((s) => s.id))('%s: deterministic + valid shape', (id) => {
+    const a = createDemoSource(48000, id)
+    const b = createDemoSource(48000, id)
+    expect(a.left.length).toBeGreaterThan(48000) // > 1 s
+    expect(a.right.length).toBe(a.left.length)
+    expect(a.peaks.length).toBe(320)
+    expect(Array.from(a.left.slice(0, 128))).toEqual(Array.from(b.left.slice(0, 128)))
+  })
+
+  it.each(DEMO_SOURCES.map((s) => s.id))('%s: label matches registry entry (label-authoritative)', (id) => {
+    const entry = DEMO_SOURCES.find((s) => s.id === id)!
+    const source = createDemoSource(48000, id)
+    expect(source.label).toBe(entry.label)
+  })
+
+  it.each(DEMO_SOURCES.map((s) => s.id))('%s: peaks are non-silent and within full scale', (id) => {
+    const source = createDemoSource(48000, id)
+    const peak = Math.max(...source.peaks)
+    expect(peak).toBeGreaterThan(0.05)
+    expect(peak).toBeLessThanOrEqual(1.0)
   })
 })
