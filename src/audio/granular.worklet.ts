@@ -7,6 +7,9 @@ import { GranularCore } from './dsp/GranularCore'
 import { StereoCircularBuffer } from './dsp/StereoCircularBuffer'
 
 declare const sampleRate: number
+// AudioWorkletGlobalScope clock, in seconds, updated per render quantum. Used to
+// convert a shared AudioContext timestamp into this engine's frame counter.
+declare const currentTime: number
 
 declare abstract class AudioWorkletProcessor {
   readonly port: MessagePort
@@ -75,6 +78,14 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
         case 'reset':
           this.core.reset(message.seed)
           break
+        case 'align-shatter': {
+          // message.time is a shared AudioContext timestamp. Convert to a frame in
+          // the core's clock using this worklet's own currentTime, so main->worklet
+          // message latency is absorbed rather than baked into the anchor.
+          const framesFromNow = Math.max(0, Math.round((message.time - currentTime) * sampleRate))
+          this.core.alignShatterAtFrame(this.core.currentFrame + framesFromNow)
+          break
+        }
       }
     }
   }

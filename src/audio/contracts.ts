@@ -189,6 +189,10 @@ export type MainToEngineMessage =
   | { type: 'clear-source' }
   | { type: 'set-notes'; notes: { offset: number; velocity: number }[] }
   | { type: 'reset'; seed?: number }
+  // Ableton Link bar alignment: land shatter step 0 on the shared downbeat at this
+  // AudioContext timestamp (the shared audio clock). The worklet maps it to the
+  // engine's frame counter via its own currentTime.
+  | { type: 'align-shatter'; time: number }
 
 export function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return minimum

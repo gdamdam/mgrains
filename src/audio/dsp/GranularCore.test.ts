@@ -420,3 +420,85 @@ describe('GranularCore', () => {
     })
   })
 })
+
+describe('GranularCore shatter Link bar alignment', () => {
+  // Drive one frame at a time so a catch-up burst cannot hide inside a block:
+  // the scheduler fires at most one step per frame, so a burst would appear as
+  // spawnedGrains > 1 or extra fired frames.
+  function driveShatter(core: GranularCore, frames: number) {
+    const events: { frame: number; step: number; spawned: number }[] = []
+    for (let i = 0; i < frames; i += 1) {
+      const startFrame = core.currentFrame
+      const result = core.process(new Float32Array(1), new Float32Array(1))
+      if (result.spawnedGrains > 0) {
+        events.push({ frame: startFrame, step: result.currentStep, spawned: result.spawnedGrains })
+      }
+    }
+    return events
+  }
+
+  function makeShatterCore() {
+    // 1000 Hz, 120 BPM, 1/16 (0.25 beat) => 125 frames per step, all steps fire.
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 8 })
+    core.setPatch({
+      ...DEFAULT_PATCH,
+      mode: 'shatter',
+      bpm: 120,
+      shatterDivision: '1/16',
+      shatterSteps: shatterSteps(),
+    })
+    const source = makeSource(256)
+    core.setSource(source, source)
+    return core
+  }
+
+  it('free-runs on a fixed grid when no Link anchor is set (disconnected unchanged)', () => {
+    const events = driveShatter(makeShatterCore(), 400)
+    expect(events.map((e) => e.frame)).toEqual([0, 125, 250, 375])
+    expect(events.map((e) => e.step)).toEqual([0, 1, 2, 3])
+    expect(events.every((e) => e.spawned === 1)).toBe(true)
+  })
+
+  it('anchors step 0 to a shared downbeat, skipping missed steps with no catch-up burst', () => {
+    const core = makeShatterCore()
+
+    // Free-run: fires at 0/125/250, next natural step is queued for frame 375.
+    const before = driveShatter(core, 300)
+    expect(before.map((e) => e.frame)).toEqual([0, 125, 250])
+    expect(before[before.length - 1].step).toBe(2)
+
+    // Shared downbeat lands at frame 360 — before the queued 375 step.
+    core.alignShatterAtFrame(360)
+    const after = driveShatter(core, 200) // frames 300..499
+
+    // Exactly one step fires at the downbeat, and it is step 0.
+    expect(after[0]).toEqual({ frame: 360, step: 0, spawned: 1 })
+    // The step that would have fired at 375 is skipped, not replayed.
+    expect(after.some((e) => e.frame === 375)).toBe(false)
+    // Sequence continues forward from the anchor (next step one interval later).
+    expect(after[1]).toEqual({ frame: 485, step: 1, spawned: 1 })
+    // No frame ever fires more than a single step (no burst).
+    expect(after.every((e) => e.spawned === 1)).toBe(true)
+  })
+
+  it('ignores a Link anchor in the past — forward-only, never retroactive', () => {
+    const core = makeShatterCore()
+    driveShatter(core, 300) // advance to frame 300, next natural step at 375
+
+    core.alignShatterAtFrame(100) // already elapsed
+    const after = driveShatter(core, 130) // frames 300..429
+
+    // No reset to step 0: the sequence keeps going as if no anchor arrived.
+    expect(after[0]).toEqual({ frame: 375, step: 3, spawned: 1 })
+  })
+
+  it('holds a single pending downbeat even when re-anchored every frame (no per-tick restart)', () => {
+    const core = makeShatterCore()
+    // Simulate 20Hz ticks all pointing at the same upcoming downbeat frame.
+    for (let k = 0; k < 12; k += 1) core.alignShatterAtFrame(200)
+
+    const events = driveShatter(core, 300)
+    const atAnchor = events.filter((e) => e.frame === 200)
+    expect(atAnchor).toEqual([{ frame: 200, step: 0, spawned: 1 }]) // fired exactly once
+  })
+})

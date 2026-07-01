@@ -33,6 +33,21 @@ export class AudioEngine {
     return this.context?.sampleRate ?? null
   }
 
+  // Current AudioContext time (the shared audio clock the worklet also reads).
+  // null until the engine is running.
+  get contextTime(): number | null {
+    return this.context?.currentTime ?? null
+  }
+
+  // Anchor the shatter sequence's step 0 to a shared Link downbeat `secondsFromNow`
+  // away. Sent as an absolute AudioContext timestamp so the worklet maps it to its
+  // frame clock precisely. No-op until the engine is running.
+  alignShatter(secondsFromNow: number): void {
+    const context = this.context
+    if (!context) return
+    this.send({ type: 'align-shatter', time: context.currentTime + Math.max(0, secondsFromNow) })
+  }
+
   onStateChange(listener: (state: AudioEngineState) => void): () => void {
     this.stateListener = listener
     return () => {

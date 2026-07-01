@@ -67,6 +67,10 @@ export class GranularCore {
   private shatterStepIndex = 0
   private shatterRatchetIndex = 0
   private lastShatterStep = 0
+  // Absolute frame at which the shatter sequence should re-anchor to step 0 for
+  // Ableton Link bar alignment; null when free-running. Applied forward-only in
+  // process(): a supplied anchor never replays the steps it skipped past.
+  private shatterAnchorFrame: number | null = null
   private pendingPatch: GrainPatch | null = null
   private modeTransitionState: ModeTransitionState = 'steady'
   private modeTransitionGain = 1
@@ -179,6 +183,17 @@ export class GranularCore {
 
   get currentFrame(): number {
     return this.frame
+  }
+
+  /**
+   * Request that shatter step 0 land on the given absolute frame — a shared Link
+   * downbeat, already projected into this engine's frame clock by the worklet.
+   * Forward-only: an anchor in the past is ignored (a late frame is dropped rather
+   * than fired as a burst), so alignment only ever corrects at a bar boundary.
+   */
+  alignShatterAtFrame(frame: number): void {
+    if (!Number.isFinite(frame) || frame < this.frame) return
+    this.shatterAnchorFrame = frame
   }
 
   get activeGrainCount(): number {
@@ -309,6 +324,7 @@ export class GranularCore {
     this.shatterStepIndex = 0
     this.shatterRatchetIndex = 0
     this.lastShatterStep = 0
+    this.shatterAnchorFrame = null
     this.modeTransitionState = 'steady'
     this.modeTransitionGain = 1
     this.smoothedOutputGain = this.targetOutputGain
@@ -418,6 +434,12 @@ export class GranularCore {
     this.comb.setParams({ frequency: this.combFreq, resonance: 0.85 })
     this.sub.setParams({ tune: this.subTune })
 
+    // A pending Link bar anchor only means anything for the shatter sequencer;
+    // drop it if the mode changed away so it can't fire stale later.
+    if (this.shatterAnchorFrame !== null && this.patch.mode !== 'shatter') {
+      this.shatterAnchorFrame = null
+    }
+
     for (let offset = 0; offset < outputLeft.length; offset += 1) {
       const absoluteFrame = this.frame + offset
       this.advanceModeTransition(absoluteFrame)
@@ -435,6 +457,18 @@ export class GranularCore {
       this.smoothedWow += (this.targetWow - this.smoothedWow) * this.outputSmoothingCoefficient
       this.smoothedComb += (this.targetComb - this.smoothedComb) * this.outputSmoothingCoefficient
       this.smoothedSub += (this.targetSub - this.smoothedSub) * this.outputSmoothingCoefficient
+
+      if (
+        this.shatterAnchorFrame !== null
+        && this.patch.mode === 'shatter'
+        && absoluteFrame >= this.shatterAnchorFrame
+      ) {
+        // Land step 0 exactly on the shared downbeat. resyncScheduler() jumps the
+        // sequence straight to step 0 at this frame, so the steps that would have
+        // played since the last anchor are skipped — never replayed as a burst.
+        this.resyncScheduler(absoluteFrame)
+        this.shatterAnchorFrame = null
+      }
 
       if (absoluteFrame >= this.nextGrainFrame) {
         if (this.patch.mode === 'shatter') {

@@ -104,6 +104,47 @@ export function wrapPhase(phase: number, quantum: number): number {
   return wrapped < 0 ? wrapped + quantum : wrapped
 }
 
+/**
+ * Beats per bar the bridge quantizes to. Its `phase` field is reported over this
+ * quantum, so a full bar (shared downbeat to downbeat) is LINK_QUANTUM beats.
+ */
+export const LINK_QUANTUM = 4
+
+/**
+ * Project a bar phase forward by `elapsedSeconds` at `bpm`, wrapped into
+ * [0, quantum). A consumer that captured {phase, bpm} at some instant uses this
+ * to estimate the phase *now*, so alignment is stamped against the same clock the
+ * frame was received on rather than a stale snapshot. Fractional bpm is preserved.
+ */
+export function projectPhase(
+  phase: number,
+  bpm: number,
+  quantum: number,
+  elapsedSeconds: number,
+): number {
+  if (!(bpm > 0) || quantum <= 0) return 0
+  const beatsElapsed = (bpm / 60) * Math.max(0, elapsedSeconds)
+  return wrapPhase(phase + beatsElapsed, quantum)
+}
+
+/**
+ * Seconds from `elapsedSeconds` after the sample until the next shared downbeat
+ * (bar phase 0). Returns 0 when already on the downbeat, or when bpm/quantum are
+ * unusable, so callers anchor forward-only and never schedule into the past.
+ * Uses fractional bpm so the downbeat lands where the session's peers agree.
+ */
+export function secondsUntilDownbeat(
+  phase: number,
+  bpm: number,
+  quantum: number,
+  elapsedSeconds = 0,
+): number {
+  if (!(bpm > 0) || quantum <= 0) return 0
+  const projected = projectPhase(phase, bpm, quantum, elapsedSeconds)
+  if (projected <= 0) return 0
+  return (quantum - projected) * 60 / bpm
+}
+
 /** Callback invoked with the latest immutable snapshot whenever state changes. */
 export type LinkStateListener = (state: Readonly<LinkState>) => void
 

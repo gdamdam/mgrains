@@ -17,7 +17,13 @@ import { controlForKey, isEditableTarget, isNoteKey, keyToSemitone } from './ins
 import { VoiceAllocator } from './instrument/voiceAllocator'
 import { MotionRecorder, resolvePresetMotion, type MotionData } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
-import { AbletonLinkClient, initialLinkState, type LinkState } from './transport/abletonLink'
+import {
+  AbletonLinkClient,
+  initialLinkState,
+  LINK_QUANTUM,
+  secondsUntilDownbeat,
+  type LinkState,
+} from './transport/abletonLink'
 import { readViewMode, writeViewMode, type ViewMode } from './ui/viewMode'
 import { LiveView } from './components/views/LiveView'
 import { StudioView } from './components/views/StudioView'
@@ -99,6 +105,14 @@ export default function App() {
   const linkEnabledRef = useRef(false)
   const [linkEnabled, setLinkEnabled] = useState(false)
   const [linkState, setLinkState] = useState<LinkState>(initialLinkState())
+  // Latest patch mode, read from the Link callback without re-subscribing.
+  const patchModeRef = useRef(patch.mode)
+  // Last whole BPM pushed from Link, so we can tell a real tempo change (re-anchor)
+  // from the fractional jitter the bridge sends every ~20Hz frame.
+  const linkBpmRef = useRef(0)
+  // Shatter bar-alignment gate: re-anchor on (re)activation and at most once per
+  // bar for drift, never per Link frame. lastAnchorTime is an AudioContext time.
+  const linkAlignRef = useRef({ active: false, lastAnchorTime: Number.NEGATIVE_INFINITY })
   const [viewMode, setViewMode] = useState<ViewMode>(readViewMode)
   const toggleViewMode = useCallback(() => {
     setViewMode((current) => {
@@ -127,14 +141,45 @@ export default function App() {
     const client = linkClientRef.current
     const unsubscribe = client.onChange((state) => {
       setLinkState(state)
-      if (!linkEnabledRef.current || !state.connected || state.bpm <= 0) return
+      if (!linkEnabledRef.current || !state.connected || state.bpm <= 0) {
+        // Disabled / disconnected: leave the shatter sequencer free-running exactly
+        // as before, and forget any anchor so re-connecting re-anchors cleanly.
+        linkAlignRef.current.active = false
+        return
+      }
+      const target = Math.round(state.bpm)
+      const bpmChanged = target !== linkBpmRef.current
+      linkBpmRef.current = target
       setPatchState((current) => {
-        const target = Math.round(state.bpm)
         if (target === current.bpm) return current
         const next = sanitizePatch({ ...current, bpm: target })
         engineRef.current?.setPatch(next)
         return next
       })
+
+      // Ableton Link bar alignment. Only meaningful while the session is playing
+      // and we're in shatter mode: anchor step 0 to the shared downbeat. We do NOT
+      // send any transport command (mgrains reads Link's transport, never drives
+      // it — so there is no command echo to guard against). Re-anchor on becoming
+      // active, on a genuine tempo change, and at most once per bar to correct
+      // drift — never on every ~20Hz frame, and always forward onto a future bar.
+      const engine = engineRef.current
+      const contextTime = engine?.contextTime ?? null
+      const shouldAlign = state.playing && patchModeRef.current === 'shatter'
+      if (engine && contextTime !== null && shouldAlign) {
+        const align = linkAlignRef.current
+        const barSeconds = LINK_QUANTUM * 60 / state.bpm
+        if (bpmChanged || !align.active || contextTime - align.lastAnchorTime >= barSeconds) {
+          engine.alignShatter(secondsUntilDownbeat(state.phase, state.bpm, LINK_QUANTUM))
+          align.lastAnchorTime = contextTime
+        }
+        align.active = true
+      } else {
+        // Remote stop, non-shatter mode, or engine not running: stop re-anchoring.
+        // The granular instrument keeps sounding (it is always-on, not a Play/Stop
+        // transport), it simply free-runs until the session starts again.
+        linkAlignRef.current.active = false
+      }
     })
     return () => {
       unsubscribe()
@@ -146,6 +191,11 @@ export default function App() {
   useEffect(() => {
     positionRef.current = patch.position
   }, [patch.position])
+
+  // Keep the latest mode available to the Link callback without re-subscribing.
+  useEffect(() => {
+    patchModeRef.current = patch.mode
+  }, [patch.mode])
 
   // Cancel any in-flight motion loop on unmount.
   useEffect(() => () => {
