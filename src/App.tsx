@@ -32,6 +32,7 @@ const INITIAL_DEMO_PEAKS = createDemoSource(8_000).peaks
 interface SampleView {
   label: string
   peaks: Float32Array
+  sourceId: string
 }
 
 const EMPTY_GRAIN_VISUALS = new Float32Array(0)
@@ -51,6 +52,7 @@ export default function App() {
   const [sampleView, setSampleView] = useState<SampleView>({
     label: 'Generated tone field',
     peaks: INITIAL_DEMO_PEAKS,
+    sourceId: 'harmonic-pad',
   })
   const [sourceMode, setSourceMode] = useState<AudioSourceMode>('sample')
   const [sourceId, setSourceId] = useState('harmonic-pad')
@@ -473,7 +475,7 @@ export default function App() {
       setSourceId('harmonic-pad')
       setPeaks(source.peaks)
       setSourceLabel(source.label)
-      setSampleView({ label: source.label, peaks: source.peaks })
+      setSampleView({ label: source.label, peaks: source.peaks, sourceId: 'harmonic-pad' })
       setSourceMode('sample')
       setFrozen(false)
       engine.setPatch(patch)
@@ -499,8 +501,9 @@ export default function App() {
       engine.setSource(source)
       setPeaks(source.peaks)
       setSourceLabel(source.label)
-      setSampleView({ label: source.label, peaks: source.peaks })
+      setSampleView({ label: source.label, peaks: source.peaks, sourceId: '' })
       setSourceMode('sample')
+      setSourceId('')
       setFrozen(false)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The audio file could not be loaded.')
@@ -510,7 +513,7 @@ export default function App() {
   const returnToSample = () => {
     engineRef.current?.useSampleSource()
     setSourceMode('sample')
-    setSourceId('harmonic-pad')
+    setSourceId(sampleView.sourceId)
     setFrozen(false)
     setPeaks(sampleView.peaks)
     setSourceLabel(sampleView.label)
@@ -529,6 +532,7 @@ export default function App() {
       const settings = await engine.enableLiveInput()
       const channels = settings.channelCount ? ` · ${settings.channelCount} ch` : ''
       setSourceMode('live')
+      setSourceId('')
       setFrozen(false)
       setLiveBufferSeconds(0)
       setPeaks(null)
@@ -581,7 +585,7 @@ export default function App() {
     setSourceId(id)
     setPeaks(source.peaks)
     setSourceLabel(source.label)
-    setSampleView({ label: source.label, peaks: source.peaks })
+    setSampleView({ label: source.label, peaks: source.peaks, sourceId: id })
     setSourceMode('sample')
     setFrozen(false)
   }, [engineState])
