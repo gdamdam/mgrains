@@ -1,3 +1,5 @@
+import { SLIDER_STEPS, fromSlider, toSlider } from './dial/sliderMapping'
+
 interface ParameterControlProps {
   label: string
   value: number
@@ -10,32 +12,9 @@ interface ParameterControlProps {
   onChange: (value: number) => void
 }
 
-const SLIDER_STEPS = 1000
-
 export function ParameterControl({
-  label,
-  value,
-  minimum,
-  maximum,
-  step,
-  unit,
-  scale = 'linear',
-  decimals = 1,
-  onChange,
+  label, value, minimum, maximum, step, unit, scale = 'linear', decimals = 1, onChange,
 }: ParameterControlProps) {
-  const normalized = scale === 'log'
-    ? Math.log(value / minimum) / Math.log(maximum / minimum)
-    : (value - minimum) / (maximum - minimum)
-
-  const updateValue = (sliderValue: number) => {
-    const ratio = sliderValue / SLIDER_STEPS
-    const raw = scale === 'log'
-      ? minimum * (maximum / minimum) ** ratio
-      : minimum + (maximum - minimum) * ratio
-    const snapped = step ? Math.round(raw / step) * step : raw
-    onChange(Math.min(maximum, Math.max(minimum, snapped)))
-  }
-
   return (
     <label className="parameter-control">
       <span className="parameter-label">{label}</span>
@@ -46,10 +25,10 @@ export function ParameterControl({
         type="range"
         min={0}
         max={SLIDER_STEPS}
-        value={Math.round(normalized * SLIDER_STEPS)}
+        value={toSlider(value, { minimum, maximum, scale })}
         aria-label={label}
         aria-valuetext={`${value.toFixed(decimals)} ${unit}`}
-        onChange={(event) => updateValue(Number(event.currentTarget.value))}
+        onChange={(event) => onChange(fromSlider(Number(event.currentTarget.value), { minimum, maximum, scale, step }))}
       />
     </label>
   )
