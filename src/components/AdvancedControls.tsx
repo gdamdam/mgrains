@@ -1,4 +1,5 @@
-import { PATCH_RANGES, type GrainPatch, type GrainWindow } from '../audio/contracts'
+import { PATCH_RANGES, type GrainPatch, type GrainWindow, type PitchScale } from '../audio/contracts'
+import { LfoControls } from './LfoControls'
 import { ParameterControl } from './ParameterControl'
 import { Select } from './select/Select'
 
@@ -7,6 +8,17 @@ const WINDOW_OPTIONS: ReadonlyArray<{ value: GrainWindow; label: string }> = [
   { value: 'percussive', label: 'Percussive' },
   { value: 'hard', label: 'Hard / rectangular' },
   { value: 'reverse', label: 'Reverse / rising' },
+  { value: 'morph', label: 'Morph (skew + hardness)' },
+]
+
+const PITCH_SCALE_OPTIONS: ReadonlyArray<{ value: PitchScale; label: string }> = [
+  { value: 'off', label: 'Off (chromatic)' },
+  { value: 'octaves', label: 'Octaves' },
+  { value: 'fifths', label: 'Fifths' },
+  { value: 'major', label: 'Major' },
+  { value: 'minor', label: 'Minor' },
+  { value: 'majorPent', label: 'Major pentatonic' },
+  { value: 'minorPent', label: 'Minor pentatonic' },
 ]
 
 interface AdvancedControlsProps {
@@ -84,6 +96,32 @@ export function AdvancedControls({ patch, onChange, onReset }: AdvancedControlsP
             decimals={1}
             onChange={(pitchSpreadSemitones) => onChange({ pitchSpreadSemitones })}
           />
+          <Select
+            label="Scatter scale"
+            value={patch.pitchQuantize}
+            options={PITCH_SCALE_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+            onChange={(pitchQuantize) => onChange({ pitchQuantize })}
+          />
+          <ParameterControl
+            label="Bend range"
+            value={patch.pitchBendRange}
+            minimum={PATCH_RANGES.pitchBendRange[0]}
+            maximum={PATCH_RANGES.pitchBendRange[1]}
+            step={1}
+            unit="st"
+            decimals={0}
+            onChange={(pitchBendRange) => onChange({ pitchBendRange })}
+          />
+          <ParameterControl
+            label="Glide"
+            value={patch.glideTime * 1000}
+            minimum={PATCH_RANGES.glideTime[0] * 1000}
+            maximum={PATCH_RANGES.glideTime[1] * 1000}
+            step={10}
+            unit="ms"
+            decimals={0}
+            onChange={(value) => onChange({ glideTime: value / 1000 })}
+          />
           <ParameterControl
             label="Reverse prob"
             value={patch.reverseProbability * 100}
@@ -117,7 +155,28 @@ export function AdvancedControls({ patch, onChange, onReset }: AdvancedControlsP
             options={WINDOW_OPTIONS.map((w) => ({ value: w.value, label: w.label }))}
             onChange={(window) => onChange({ window })}
           />
+          <ParameterControl
+            label="Window skew"
+            value={patch.windowSkew * 100}
+            minimum={PATCH_RANGES.windowSkew[0] * 100}
+            maximum={PATCH_RANGES.windowSkew[1] * 100}
+            step={1}
+            unit="%"
+            decimals={0}
+            onChange={(value) => onChange({ windowSkew: value / 100 })}
+          />
+          <ParameterControl
+            label="Window hardness"
+            value={patch.windowHardness * 100}
+            minimum={PATCH_RANGES.windowHardness[0] * 100}
+            maximum={PATCH_RANGES.windowHardness[1] * 100}
+            step={1}
+            unit="%"
+            decimals={0}
+            onChange={(value) => onChange({ windowHardness: value / 100 })}
+          />
         </div>
+        <LfoControls patch={patch} onChange={onChange} />
         <button type="button" className="advanced-reset" onClick={onReset}>
           Reset advanced
         </button>

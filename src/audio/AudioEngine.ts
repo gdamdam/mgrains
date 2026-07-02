@@ -156,6 +156,12 @@ export class AudioEngine {
     this.send({ type: 'set-notes', notes })
   }
 
+  // Global pitch-bend offset in semitones (UI scales the wheel by the patch's
+  // bend range before calling this).
+  setPitchBend(semitones: number): void {
+    this.send({ type: 'set-pitch-bend', semitones })
+  }
+
   setSource(source: AudioSourceData): void {
     this.stopLiveInput()
     const left = source.left.slice()

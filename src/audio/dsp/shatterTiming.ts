@@ -1,6 +1,6 @@
 import type { ShatterDivision } from '../contracts'
 
-const DIVISION_BEATS: Record<ShatterDivision, number> = {
+export const DIVISION_BEATS: Record<ShatterDivision, number> = {
   '1/4': 1,
   '1/8D': 0.75,
   '1/8': 0.5,

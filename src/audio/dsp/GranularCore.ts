@@ -1,10 +1,16 @@
 import {
+  clamp,
   DEFAULT_PATCH,
+  LFO_COUNT,
+  PATCH_RANGES,
   sanitizePatch,
+  SCALE_MASKS,
   type GrainMode,
   type GrainPatch,
   type GrainWindow,
+  type LfoConfig,
 } from '../contracts'
+import { DIVISION_BEATS } from './shatterTiming'
 import { bitcrush, OnePole, softClipDrive } from './effects'
 import { Formant } from './formant'
 import { Reverb } from './reverb'
@@ -39,9 +45,12 @@ const OUTPUT_SMOOTHING_SECONDS = 0.02
 const FX_EPSILON = 1e-4
 // Darkest lowpass the damping macro reaches (normalized cutoff), keeping some body.
 const DAMP_MIN_CUTOFF = 0.04
-// Repeat (delay) time as a fraction of a whole note — a dotted eighth (3/16),
-// the classic tempo-synced delay feel.
-const REPEAT_DIVISION = 0.1875
+
+// Repeat (delay) time in seconds for a tempo-synced division. DIVISION_BEATS is
+// in quarter-note beats; divisionToSeconds wants a whole-note fraction (÷4).
+function repeatDivisionSeconds(patch: GrainPatch): number {
+  return divisionToSeconds(DIVISION_BEATS[patch.repeatDivision] / 4, patch.bpm)
+}
 
 type ModeTransitionState = 'steady' | 'fade-out' | 'fade-in'
 
@@ -133,6 +142,27 @@ export class GranularCore {
   private readonly activeVelocities = new Float64Array(8)
   private activeNoteCount = 0
 
+  // Pitch bend (semitones, smoothed) applied globally to every voice, and a
+  // last-note glide that ramps the played pitch when glideTime > 0.
+  private targetPitchBend = 0
+  private smoothedPitchBend = 0
+  private glidePitch = 0
+  private glideTarget = 0
+  private glideInitialized = false
+
+  // Modulation layer: per-LFO sample-and-hold / random-walk state re-evaluated
+  // once per process() block, plus the modulated parameter snapshot the spawn
+  // path reads instead of the raw patch values.
+  private readonly lfoHold = new Float64Array(LFO_COUNT)
+  private readonly lfoDrift = new Float64Array(LFO_COUNT)
+  private readonly lfoCycle = new Int32Array(LFO_COUNT).fill(-1)
+  private readonly lfoRng: XorShift32
+  private modPosition = DEFAULT_PATCH.position
+  private modSpray = DEFAULT_PATCH.spray
+  private modGrainSizeMs = DEFAULT_PATCH.grainSizeMs
+  private modDensityHz = DEFAULT_PATCH.densityHz
+  private modPitchSpread = DEFAULT_PATCH.pitchSpreadSemitones
+
   private readonly active: Uint8Array
   private readonly sourcePosition: Float64Array
   private readonly grainSourceOffset: Float64Array
@@ -157,6 +187,9 @@ export class GranularCore {
       -1 / Math.max(1, sampleRate * OUTPUT_SMOOTHING_SECONDS),
     )
     this.rng = new XorShift32(this.patch.seed)
+    // Dedicated stream so S&H/drift LFOs never perturb grain-spawn randomness
+    // (which must stay reproducible for a given seed).
+    this.lfoRng = new XorShift32((this.patch.seed ^ 0x9e3779b9) >>> 0)
     this.active = new Uint8Array(this.maxGrains)
     this.sourcePosition = new Float64Array(this.maxGrains)
     this.grainSourceOffset = new Float64Array(this.maxGrains)
@@ -178,7 +211,7 @@ export class GranularCore {
     this.sub = new Sub(this.sampleRate)
     this.limiter = new Limiter(this.sampleRate)
     this.limiter.setParams({ ceiling: 0.95, release: 0.1 })
-    this.repeatTimeSeconds = divisionToSeconds(REPEAT_DIVISION, this.patch.bpm)
+    this.repeatTimeSeconds = repeatDivisionSeconds(this.patch)
   }
 
   get currentFrame(): number {
@@ -235,7 +268,12 @@ export class GranularCore {
         (positionFromCurrentOrigin % this.sourceLength) + this.sourceLength
       ) % this.sourceLength
       positions[count] = logicalPosition / Math.max(1, this.sourceLength - 1)
-      intensities[count] = grainWindow(decodeWindow(this.windowCode[grain]), phase)
+      intensities[count] = grainWindow(
+        decodeWindow(this.windowCode[grain]),
+        phase,
+        this.patch.windowSkew,
+        this.patch.windowHardness,
+      )
       count += 1
     }
 
@@ -349,6 +387,12 @@ export class GranularCore {
     this.formantActive = false
     this.ringModActive = false
     this.rng.reset(seed ?? this.patch.seed)
+    this.lfoRng.reset(((seed ?? this.patch.seed) ^ 0x9e3779b9) >>> 0)
+    this.lfoHold.fill(0)
+    this.lfoDrift.fill(0)
+    this.lfoCycle.fill(-1)
+    this.smoothedPitchBend = this.targetPitchBend
+    this.glideInitialized = false
   }
 
   private snapFxToTargets(): void {
@@ -423,7 +467,7 @@ export class GranularCore {
     this.reverb.setParams({ size: 0.35 + this.targetSpace * 0.6, damp: 0.4, width: 1 })
     this.delay.setParams({
       timeSeconds: this.repeatTimeSeconds,
-      feedback: this.targetRepeat * 0.85,
+      feedback: this.patch.repeatFeedback,
       tone: 0.4,
       width: 0.7,
     })
@@ -439,6 +483,11 @@ export class GranularCore {
     if (this.shatterAnchorFrame !== null && this.patch.mode !== 'shatter') {
       this.shatterAnchorFrame = null
     }
+
+    // Pitch bend, glide, and LFO modulation are evaluated once per block (grains
+    // sample these only at spawn, which is far slower than the block rate), then
+    // read by the spawn path via the mod* snapshot.
+    this.updateModulation(outputLeft.length)
 
     for (let offset = 0; offset < outputLeft.length; offset += 1) {
       const absoluteFrame = this.frame + offset
@@ -476,7 +525,7 @@ export class GranularCore {
         } else {
           this.spawnVoices(0, false)
           spawnedGrains += 1
-          const intervalFrames = this.sampleRate / this.patch.densityHz
+          const intervalFrames = this.sampleRate / this.modDensityHz
           const jitter = 1 + this.rng.nextBipolar() * this.patch.timingJitter * 0.45
           this.nextGrainFrame += Math.max(1, intervalFrames * jitter)
         }
@@ -494,7 +543,12 @@ export class GranularCore {
           continue
         }
 
-        const envelope = grainWindow(decodeWindow(this.windowCode[grain]), phase)
+        const envelope = grainWindow(
+          decodeWindow(this.windowCode[grain]),
+          phase,
+          this.patch.windowSkew,
+          this.patch.windowHardness,
+        )
         const sourceFrame = this.wrapFrameInRegion(
           this.sourcePosition[grain],
           this.regionStartFrame[grain],
@@ -572,6 +626,96 @@ export class GranularCore {
     }
   }
 
+  // Recompute pitch bend, glide, and the LFO-modulated parameter snapshot once
+  // per audio block. Grains read the mod* fields at spawn.
+  private updateModulation(blockFrames: number): void {
+    const bendCoeff = 1 - Math.exp(
+      -blockFrames / Math.max(1, this.sampleRate * OUTPUT_SMOOTHING_SECONDS),
+    )
+    this.smoothedPitchBend += (this.targetPitchBend - this.smoothedPitchBend) * bendCoeff
+
+    if (this.patch.glideTime > FX_EPSILON && this.activeNoteCount > 0) {
+      const glideCoeff = 1 - Math.exp(
+        -blockFrames / Math.max(1, this.sampleRate * this.patch.glideTime),
+      )
+      this.glidePitch += (this.glideTarget - this.glidePitch) * glideCoeff
+    } else {
+      this.glidePitch = this.glideTarget
+    }
+
+    let position = this.patch.position
+    let spray = this.patch.spray
+    let grainSizeMs = this.patch.grainSizeMs
+    let densityHz = this.patch.densityHz
+    let pitchSpread = this.patch.pitchSpreadSemitones
+
+    const timeSeconds = this.frame / this.sampleRate
+    for (let index = 0; index < LFO_COUNT; index += 1) {
+      const lfo = this.patch.lfos[index]
+      if (!lfo || lfo.target === 'none' || lfo.depth <= 0) continue
+      const raw = this.evaluateLfo(lfo, index, timeSeconds)
+      const shaped = lfo.bipolar ? raw : (raw + 1) * 0.5
+      const [lo, hi] = PATCH_RANGES[lfo.target]
+      const amount = lfo.depth * shaped * (hi - lo)
+      switch (lfo.target) {
+        case 'position': position += amount; break
+        case 'spray': spray += amount; break
+        case 'grainSizeMs': grainSizeMs += amount; break
+        case 'densityHz': densityHz += amount; break
+        case 'pitchSpreadSemitones': pitchSpread += amount; break
+      }
+    }
+
+    // Position wraps (it's a phase); the rest clamp to their ranges.
+    this.modPosition = position - Math.floor(position)
+    this.modSpray = clamp(spray, ...PATCH_RANGES.spray)
+    this.modGrainSizeMs = clamp(grainSizeMs, ...PATCH_RANGES.grainSizeMs)
+    this.modDensityHz = clamp(densityHz, ...PATCH_RANGES.densityHz)
+    this.modPitchSpread = clamp(pitchSpread, ...PATCH_RANGES.pitchSpreadSemitones)
+  }
+
+  // Evaluate one LFO to a bipolar -1..1 value. Phase is derived from the frame
+  // clock (free) or the patch tempo (link) so it stays glitch-free and needs no
+  // per-sample state beyond the S&H/drift hold.
+  private evaluateLfo(lfo: LfoConfig, index: number, timeSeconds: number): number {
+    const rateHz = lfo.sync === 'link'
+      ? this.patch.bpm / (60 * DIVISION_BEATS[lfo.division])
+      : lfo.rateHz
+    const phase = timeSeconds * rateHz + lfo.phase
+    const frac = phase - Math.floor(phase)
+    const cycle = Math.floor(phase)
+
+    switch (lfo.shape) {
+      case 'sine':
+        return Math.sin(Math.PI * 2 * frac)
+      case 'saw':
+        return 2 * frac - 1
+      case 'tri':
+        return 1 - 2 * Math.abs(2 * frac - 1)
+      case 'sh':
+        if (cycle !== this.lfoCycle[index]) {
+          this.lfoCycle[index] = cycle
+          this.lfoHold[index] = this.lfoRng.nextBipolar()
+        }
+        return this.lfoHold[index]
+      case 'drift':
+        if (cycle !== this.lfoCycle[index]) {
+          this.lfoCycle[index] = cycle
+          this.lfoHold[index] = this.lfoRng.nextBipolar()
+        }
+        // Slew toward each new target for a smooth continuous wander.
+        this.lfoDrift[index] += (this.lfoHold[index] - this.lfoDrift[index]) * 0.05
+        return this.lfoDrift[index]
+      default:
+        return 0
+    }
+  }
+
+  private quantizeScatter(semitones: number): number {
+    if (this.patch.pitchQuantize === 'off') return semitones
+    return snapToScale(semitones, SCALE_MASKS[this.patch.pitchQuantize])
+  }
+
   private scheduleShatterEvent(): number {
     const step = this.patch.shatterSteps[this.shatterStepIndex]
     this.lastShatterStep = this.shatterStepIndex
@@ -606,6 +750,21 @@ export class GranularCore {
         : 1
     }
     this.activeNoteCount = count
+    if (count > 0) {
+      // Glide (mono/last-note): ramp toward the newest held note. Snap on the
+      // very first note so a patch doesn't slide up from 0 when playing begins.
+      this.glideTarget = this.activeNotes[count - 1]
+      if (!this.glideInitialized) {
+        this.glidePitch = this.glideTarget
+        this.glideInitialized = true
+      }
+    }
+  }
+
+  // Set the global pitch-bend offset in semitones (already scaled by the patch's
+  // bend range in the UI). Smoothed per block so wheel moves never zipper.
+  setPitchBend(semitones: number): void {
+    this.targetPitchBend = Number.isFinite(semitones) ? semitones : 0
   }
 
   // Spawn one grain per held note (transposed by note + extraSemitones, scaled by
@@ -613,6 +772,13 @@ export class GranularCore {
   private spawnVoices(extraSemitones: number, forceReverse: boolean): void {
     if (this.activeNoteCount === 0) {
       this.spawnGrain(extraSemitones, forceReverse)
+      return
+    }
+    if (this.patch.glideTime > FX_EPSILON) {
+      // Glide collapses polyphony to a single last-note voice that slides
+      // between pitches — the standard portamento behavior for a lead.
+      const velocity = this.activeVelocities[this.activeNoteCount - 1]
+      this.spawnGrain(extraSemitones + this.glidePitch, forceReverse, velocity)
       return
     }
     for (let index = 0; index < this.activeNoteCount; index += 1) {
@@ -626,16 +792,20 @@ export class GranularCore {
     const regionEnd = Math.max(regionStart + 2, Math.ceil(this.patch.regionEnd * this.sourceLength))
     const regionLength = Math.max(2, regionEnd - regionStart)
     const elapsedSeconds = this.frame / this.sampleRate
-    const movingPosition = this.patch.position + elapsedSeconds * this.patch.scanSpeed
+    const movingPosition = this.modPosition + elapsedSeconds * this.patch.scanSpeed
     const normalizedPosition = movingPosition - Math.floor(movingPosition)
-    const spray = this.rng.nextBipolar() * this.patch.spray * 0.5
+    const spray = this.rng.nextBipolar() * this.modSpray * 0.5
     const positionInRegion = this.wrapUnit(normalizedPosition + spray)
+    // Scatter is drawn chromatically, then optionally snapped to a scale so a
+    // wide spread reads as harmony instead of detuned noise. Bend applies to the
+    // whole voice (played note + scatter) so it tracks the pitch wheel.
+    const scatter = this.quantizeScatter(this.rng.nextBipolar() * this.modPitchSpread)
     const pitch = this.patch.pitchSemitones + pitchOffsetSemitones
-      + this.rng.nextBipolar() * this.patch.pitchSpreadSemitones
+      + scatter + this.smoothedPitchBend
     const direction = forceReverse || this.rng.nextFloat() < this.patch.reverseProbability ? -1 : 1
     const pan = this.rng.nextBipolar() * this.patch.stereoSpread
-    const durationFrames = Math.max(2, this.patch.grainSizeMs * 0.001 * this.sampleRate)
-    const expectedOverlap = Math.max(1, this.patch.densityHz * durationFrames / this.sampleRate)
+    const durationFrames = Math.max(2, this.modGrainSizeMs * 0.001 * this.sampleRate)
+    const expectedOverlap = Math.max(1, this.modDensityHz * durationFrames / this.sampleRate)
     const normalizedGain = velocity / Math.sqrt(expectedOverlap)
 
     this.active[slot] = 1
@@ -689,7 +859,7 @@ export class GranularCore {
     this.combFreq = nextPatch.combFreq
     this.targetSub = nextPatch.subAmount
     this.subTune = nextPatch.subTune
-    this.repeatTimeSeconds = divisionToSeconds(REPEAT_DIVISION, nextPatch.bpm)
+    this.repeatTimeSeconds = repeatDivisionSeconds(nextPatch)
     if (nextPatch.seed !== previousSeed) this.rng.reset(nextPatch.seed)
     if (
       forceResync
@@ -772,11 +942,31 @@ export class GranularCore {
   }
 }
 
+// Snap a semitone offset to the nearest degree of a scale mask (pitch classes
+// 0..11). The octave is preserved and the mask wraps at the octave so an offset
+// just below the octave can snap up to the next root.
+function snapToScale(semitones: number, mask: readonly number[]): number {
+  const octave = Math.floor(semitones / 12)
+  const within = semitones - octave * 12
+  let best = mask[0]
+  let bestDistance = Infinity
+  for (let index = 0; index <= mask.length; index += 1) {
+    const pitchClass = index < mask.length ? mask[index] : mask[0] + 12
+    const distance = Math.abs(within - pitchClass)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = pitchClass
+    }
+  }
+  return octave * 12 + best
+}
+
 function encodeWindow(window: GrainWindow): number {
   switch (window) {
     case 'percussive': return 1
     case 'hard': return 2
     case 'reverse': return 3
+    case 'morph': return 4
     case 'hann':
     default: return 0
   }
@@ -787,6 +977,7 @@ function decodeWindow(code: number): GrainWindow {
     case 1: return 'percussive'
     case 2: return 'hard'
     case 3: return 'reverse'
+    case 4: return 'morph'
     case 0:
     default: return 'hann'
   }

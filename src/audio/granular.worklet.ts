@@ -75,6 +75,9 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
         case 'set-notes':
           this.core.setActiveNotes(message.notes)
           break
+        case 'set-pitch-bend':
+          this.core.setPitchBend(message.semitones)
+          break
         case 'reset':
           this.core.reset(message.seed)
           break

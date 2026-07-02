@@ -26,6 +26,35 @@ describe('sanitizePatch', () => {
     expect(patch.outputGain).toBe(1)
   })
 
+  it('back-fills repeatFeedback from a legacy patch that only carried repeat', () => {
+    // Old presets predate the send/feedback split; reproduce their loop gain.
+    const legacy = { ...DEFAULT_PATCH, repeat: 0.65 } as Record<string, unknown>
+    delete legacy.repeatFeedback
+    const patch = sanitizePatch(legacy as unknown as typeof DEFAULT_PATCH)
+    expect(patch.repeatFeedback).toBeCloseTo(0.65 * 0.85)
+    expect(patch.repeatDivision).toBe(DEFAULT_PATCH.repeatDivision)
+  })
+
+  it('always yields exactly two sanitized LFOs and defaults invalid musical fields', () => {
+    const partial = { ...DEFAULT_PATCH } as Record<string, unknown>
+    delete partial.lfos
+    partial.pitchQuantize = 'bogus'
+    partial.window = 'nonsense'
+    partial.windowSkew = 5
+    const patch = sanitizePatch(partial as unknown as typeof DEFAULT_PATCH)
+    expect(patch.lfos).toHaveLength(2)
+    expect(patch.lfos[0].target).toBe('none')
+    expect(patch.pitchQuantize).toBe('off')
+    expect(patch.window).toBe('hann')
+    expect(patch.windowSkew).toBe(1) // clamped to range max
+  })
+
+  it('accepts the morph window and a valid scatter scale', () => {
+    const patch = sanitizePatch({ ...DEFAULT_PATCH, window: 'morph', pitchQuantize: 'minorPent' })
+    expect(patch.window).toBe('morph')
+    expect(patch.pitchQuantize).toBe('minorPent')
+  })
+
   it('normalizes Shatter steps to a safe deterministic lane', () => {
     const patch = sanitizePatch({
       ...DEFAULT_PATCH,

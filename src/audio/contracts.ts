@@ -2,7 +2,63 @@ export type GrainMode = 'bloom' | 'shatter'
 
 export type AudioSourceMode = 'sample' | 'live'
 
-export type GrainWindow = 'hann' | 'percussive' | 'hard' | 'reverse'
+export type GrainWindow = 'hann' | 'percussive' | 'hard' | 'reverse' | 'morph'
+
+// Scale mask for per-grain pitch scatter. 'off' leaves the chromatic-random
+// spread untouched; every other value snaps each grain's random offset to the
+// nearest degree of that scale, turning detuned smear into harmony.
+export type PitchScale =
+  | 'off'
+  | 'octaves'
+  | 'fifths'
+  | 'major'
+  | 'minor'
+  | 'majorPent'
+  | 'minorPent'
+
+// Pitch classes (semitone offsets within an octave) for each scale mask. Frozen
+// so the engine can read them allocation-free on the audio thread.
+export const SCALE_MASKS: Readonly<Record<Exclude<PitchScale, 'off'>, readonly number[]>> =
+  Object.freeze({
+    octaves: [0],
+    fifths: [0, 7],
+    major: [0, 2, 4, 5, 7, 9, 11],
+    minor: [0, 2, 3, 5, 7, 8, 10],
+    majorPent: [0, 2, 4, 7, 9],
+    minorPent: [0, 3, 5, 7, 10],
+  })
+
+export const PITCH_SCALES = ['off', 'octaves', 'fifths', 'major', 'minor', 'majorPent', 'minorPent'] as const
+
+export type LfoShape = 'sine' | 'tri' | 'saw' | 'sh' | 'drift'
+export type LfoSync = 'free' | 'link'
+export type LfoTarget =
+  | 'none'
+  | 'position'
+  | 'grainSizeMs'
+  | 'densityHz'
+  | 'spray'
+  | 'pitchSpreadSemitones'
+
+export const LFO_SHAPES = ['sine', 'tri', 'saw', 'sh', 'drift'] as const
+export const LFO_TARGETS = ['none', 'position', 'grainSizeMs', 'densityHz', 'spray', 'pitchSpreadSemitones'] as const
+
+// One assignable low-frequency modulator. `depth` is a normalized 0..1 fraction
+// of the target parameter's full range; `bipolar` centers the swing on the base
+// value, otherwise it only adds. `sync` picks between a free rate in Hz and a
+// tempo division (from SHATTER_DIVISIONS) locked to the patch BPM.
+export interface LfoConfig {
+  shape: LfoShape
+  sync: LfoSync
+  rateHz: number
+  division: ShatterDivision
+  depth: number
+  target: LfoTarget
+  bipolar: boolean
+  phase: number
+}
+
+export const LFO_COUNT = 2
 
 export const SHATTER_DIVISIONS = [
   '1/4',
@@ -40,15 +96,22 @@ export interface GrainPatch {
   scanSpeed: number
   pitchSemitones: number
   pitchSpreadSemitones: number
+  pitchQuantize: PitchScale
+  pitchBendRange: number
+  glideTime: number
   reverseProbability: number
   stereoSpread: number
   window: GrainWindow
+  windowSkew: number
+  windowHardness: number
   outputGain: number
   drive: number
   crush: number
   damp: number
   space: number
   repeat: number
+  repeatDivision: ShatterDivision
+  repeatFeedback: number
   tapeAmount: number
   tapeTone: number
   formantAmount: number
@@ -65,7 +128,19 @@ export interface GrainPatch {
   bpm: number
   shatterDivision: ShatterDivision
   shatterSteps: ShatterStep[]
+  lfos: LfoConfig[]
 }
+
+export const DEFAULT_LFO: Readonly<LfoConfig> = Object.freeze({
+  shape: 'sine',
+  sync: 'free',
+  rateHz: 0.25,
+  division: '1/4',
+  depth: 0,
+  target: 'none',
+  bipolar: true,
+  phase: 0,
+})
 
 export const DEFAULT_SHATTER_STEPS: ReadonlyArray<Readonly<ShatterStep>> = Object.freeze(
   Array.from({ length: 16 }, (_, index): Readonly<ShatterStep> => Object.freeze({
@@ -90,15 +165,22 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   scanSpeed: 0.01,
   pitchSemitones: 0,
   pitchSpreadSemitones: 0.12,
+  pitchQuantize: 'off',
+  pitchBendRange: 2,
+  glideTime: 0,
   reverseProbability: 0.08,
   stereoSpread: 0.72,
   window: 'hann',
+  windowSkew: 0,
+  windowHardness: 0,
   outputGain: 0.72,
   drive: 0,
   crush: 0,
   damp: 0,
   space: 0,
   repeat: 0,
+  repeatDivision: '1/8D',
+  repeatFeedback: 0.5,
   tapeAmount: 0,
   tapeTone: 0.5,
   formantAmount: 0,
@@ -115,6 +197,7 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   bpm: 120,
   shatterDivision: '1/16',
   shatterSteps: DEFAULT_SHATTER_STEPS.map((step) => ({ ...step })),
+  lfos: [{ ...DEFAULT_LFO }, { ...DEFAULT_LFO }],
 })
 
 export const PATCH_RANGES = Object.freeze({
@@ -126,14 +209,19 @@ export const PATCH_RANGES = Object.freeze({
   scanSpeed: [-2, 2] as const,
   pitchSemitones: [-36, 36] as const,
   pitchSpreadSemitones: [0, 24] as const,
+  pitchBendRange: [0, 24] as const,
+  glideTime: [0, 2] as const,
   reverseProbability: [0, 1] as const,
   stereoSpread: [0, 1] as const,
+  windowSkew: [-1, 1] as const,
+  windowHardness: [0, 1] as const,
   outputGain: [0, 1] as const,
   drive: [0, 1] as const,
   crush: [0, 1] as const,
   damp: [0, 1] as const,
   space: [0, 1] as const,
   repeat: [0, 1] as const,
+  repeatFeedback: [0, 1] as const,
   tapeAmount: [0, 1] as const,
   tapeTone: [0, 1] as const,
   formantAmount: [0, 1] as const,
@@ -147,6 +235,13 @@ export const PATCH_RANGES = Object.freeze({
   subAmount: [0, 1] as const,
   subTune: [30, 120] as const,
   bpm: [30, 300] as const,
+})
+
+// LFO field ranges are kept out of PATCH_RANGES because they are per-LFO, not
+// top-level patch fields (tooling treats every PATCH_RANGES key as a patch key).
+export const LFO_RANGES = Object.freeze({
+  rateHz: [0.01, 20] as const,
+  depth: [0, 1] as const,
 })
 
 // Parameters surfaced in the Advanced panel rather than on the main performance
@@ -188,6 +283,7 @@ export type MainToEngineMessage =
   | { type: 'clear-live-buffer' }
   | { type: 'clear-source' }
   | { type: 'set-notes'; notes: { offset: number; velocity: number }[] }
+  | { type: 'set-pitch-bend'; semitones: number }
   | { type: 'reset'; seed?: number }
   // Ableton Link bar alignment: land shatter step 0 on the shared downbeat at this
   // AudioContext timestamp (the shared audio clock). The worklet maps it to the
@@ -219,17 +315,35 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
       candidate.pitchSpreadSemitones,
       ...PATCH_RANGES.pitchSpreadSemitones,
     ),
+    pitchQuantize: PITCH_SCALES.includes(candidate.pitchQuantize)
+      ? candidate.pitchQuantize
+      : 'off',
+    pitchBendRange: Number.isFinite(candidate.pitchBendRange)
+      ? clamp(candidate.pitchBendRange, ...PATCH_RANGES.pitchBendRange)
+      : DEFAULT_PATCH.pitchBendRange,
+    glideTime: clamp(candidate.glideTime, ...PATCH_RANGES.glideTime),
     reverseProbability: clamp(candidate.reverseProbability, ...PATCH_RANGES.reverseProbability),
     stereoSpread: clamp(candidate.stereoSpread, ...PATCH_RANGES.stereoSpread),
-    window: ['hann', 'percussive', 'hard', 'reverse'].includes(candidate.window)
+    window: ['hann', 'percussive', 'hard', 'reverse', 'morph'].includes(candidate.window)
       ? candidate.window
       : 'hann',
+    windowSkew: clamp(candidate.windowSkew, ...PATCH_RANGES.windowSkew),
+    windowHardness: clamp(candidate.windowHardness, ...PATCH_RANGES.windowHardness),
     outputGain: clamp(candidate.outputGain, ...PATCH_RANGES.outputGain),
     drive: clamp(candidate.drive, ...PATCH_RANGES.drive),
     crush: clamp(candidate.crush, ...PATCH_RANGES.crush),
     damp: clamp(candidate.damp, ...PATCH_RANGES.damp),
     space: clamp(candidate.space, ...PATCH_RANGES.space),
     repeat: clamp(candidate.repeat, ...PATCH_RANGES.repeat),
+    repeatDivision: SHATTER_DIVISIONS.includes(candidate.repeatDivision)
+      ? candidate.repeatDivision
+      : DEFAULT_PATCH.repeatDivision,
+    // Back-compat: presets from before the send/feedback split carry only
+    // `repeat`, which conflated both. Reproduce their exact loop gain
+    // (repeat * 0.85, capped) so old patches sound identical.
+    repeatFeedback: Number.isFinite(candidate.repeatFeedback)
+      ? clamp(candidate.repeatFeedback, ...PATCH_RANGES.repeatFeedback)
+      : Math.min(0.95, clamp(candidate.repeat, ...PATCH_RANGES.repeat) * 0.85),
     tapeAmount: clamp(candidate.tapeAmount, ...PATCH_RANGES.tapeAmount),
     tapeTone: clamp(candidate.tapeTone, ...PATCH_RANGES.tapeTone),
     formantAmount: clamp(candidate.formantAmount, ...PATCH_RANGES.formantAmount),
@@ -248,7 +362,26 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
       ? candidate.shatterDivision
       : DEFAULT_PATCH.shatterDivision,
     shatterSteps: sanitizeShatterSteps(candidate.shatterSteps),
+    lfos: sanitizeLfos(candidate.lfos),
   }
+}
+
+function sanitizeLfos(candidate: LfoConfig[] | undefined): LfoConfig[] {
+  const source = Array.isArray(candidate) ? candidate : []
+  return Array.from({ length: LFO_COUNT }, (_, index) => {
+    const lfo = source[index]
+    if (!lfo) return { ...DEFAULT_LFO }
+    return {
+      shape: LFO_SHAPES.includes(lfo.shape) ? lfo.shape : DEFAULT_LFO.shape,
+      sync: lfo.sync === 'link' ? 'link' : 'free',
+      rateHz: clamp(lfo.rateHz, ...LFO_RANGES.rateHz),
+      division: SHATTER_DIVISIONS.includes(lfo.division) ? lfo.division : DEFAULT_LFO.division,
+      depth: clamp(lfo.depth, ...LFO_RANGES.depth),
+      target: LFO_TARGETS.includes(lfo.target) ? lfo.target : 'none',
+      bipolar: lfo.bipolar !== false,
+      phase: Number.isFinite(lfo.phase) ? ((lfo.phase % 1) + 1) % 1 : 0,
+    }
+  })
 }
 
 // Reset only the advanced parameters to their defaults, leaving the main

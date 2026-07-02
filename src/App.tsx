@@ -107,6 +107,7 @@ export default function App() {
   const [linkState, setLinkState] = useState<LinkState>(initialLinkState())
   // Latest patch mode, read from the Link callback without re-subscribing.
   const patchModeRef = useRef(patch.mode)
+  const pitchBendRangeRef = useRef(patch.pitchBendRange)
   // Last whole BPM pushed from Link, so we can tell a real tempo change (re-anchor)
   // from the fractional jitter the bridge sends every ~20Hz frame.
   const linkBpmRef = useRef(0)
@@ -197,6 +198,11 @@ export default function App() {
     patchModeRef.current = patch.mode
   }, [patch.mode])
 
+  // Keep the latest bend range available to the MIDI callback without re-subscribing.
+  useEffect(() => {
+    pitchBendRangeRef.current = patch.pitchBendRange
+  }, [patch.pitchBendRange])
+
   // Cancel any in-flight motion loop on unmount.
   useEffect(() => () => {
     if (motionRafRef.current !== null) cancelAnimationFrame(motionRafRef.current)
@@ -272,6 +278,9 @@ export default function App() {
         pushNotes()
       } else if (event.type === 'noteoff') {
         if (alloc.noteOff(event.note - 60, `midi:${event.device}:${event.channel}`) !== null) pushNotes()
+      } else if (event.type === 'pitchbend') {
+        // Normalized -1..1 → semitones scaled by the patch's bend range.
+        engineRef.current?.setPitchBend(event.value * pitchBendRangeRef.current)
       } else if (event.type === 'disconnect') {
         // Unplugged device: release every voice it still holds so notes don't stick.
         if (alloc.releaseOwnerPrefix(`midi:${event.device}:`)) pushNotes()

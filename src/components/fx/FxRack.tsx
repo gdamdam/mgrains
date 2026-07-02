@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { GrainPatch } from '../../audio/contracts'
+import { SHATTER_DIVISIONS, type GrainPatch, type ShatterDivision } from '../../audio/contracts'
+import { Select } from '../select/Select'
 import { FxBar, type FxBarItem } from './FxBar'
 import { FxCurveSvg } from './FxCurveSvg'
 import { FxModal } from './FxModal'
@@ -71,7 +72,12 @@ const FX: FxDef[] = [
     params: [{ key: 'subTune', label: 'Tune', min: 30, max: 120, step: 1, unit: 'Hz', kind: 'raw' }],
   },
   { id: 'space', label: 'Space', amountKey: 'space', params: [] },
-  { id: 'repeat', label: 'Repeat', amountKey: 'repeat', params: [] },
+  {
+    id: 'repeat',
+    label: 'Repeat',
+    amountKey: 'repeat',
+    params: [{ key: 'repeatFeedback', label: 'Feedback', min: 0, max: 1, unit: '%', kind: 'pct' }],
+  },
 ]
 
 interface FxRackProps {
@@ -127,6 +133,14 @@ export function FxRack({ patch, onChange }: FxRackProps) {
               unit="%"
               onChange={(value) => onChange({ [openFx.amountKey]: value / 100 } as Partial<GrainPatch>)}
             />
+            {openFx.id === 'repeat' && (
+              <Select
+                label="Division"
+                value={patch.repeatDivision}
+                options={SHATTER_DIVISIONS.map((d) => ({ value: d, label: d }))}
+                onChange={(value: ShatterDivision) => onChange({ repeatDivision: value })}
+              />
+            )}
             {openFx.params.map((param) => (
               <FxParamSlider
                 key={param.key as string}
