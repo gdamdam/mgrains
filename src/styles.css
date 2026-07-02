@@ -212,6 +212,48 @@ button.file-button:disabled {
   gap: 8px;
 }
 
+.header-slider {
+  position: relative;
+  display: inline-flex;
+}
+
+.header-slider-trigger {
+  gap: 8px;
+}
+
+.header-slider-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.header-slider-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 200px;
+  padding: 12px 14px;
+  background: var(--panel-raised);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+}
+
+.header-slider-pop input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.header-slider-readout {
+  min-width: 44px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .file-button input {
   position: absolute;
   width: 1px;

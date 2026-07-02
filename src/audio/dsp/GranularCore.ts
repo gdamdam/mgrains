@@ -86,6 +86,10 @@ export class GranularCore {
   private readonly modeTransitionStep: number
   private smoothedOutputGain = DEFAULT_PATCH.outputGain
   private targetOutputGain = DEFAULT_PATCH.outputGain
+  // Input trim applied to the granulated source before the coloration FX chain
+  // and the master output gain. Smoothed so header moves never click.
+  private smoothedInputGain = DEFAULT_PATCH.inputGain
+  private targetInputGain = DEFAULT_PATCH.inputGain
   private readonly outputSmoothingCoefficient: number
   private smoothedDrive = 0
   private targetDrive = 0
@@ -396,6 +400,7 @@ export class GranularCore {
   }
 
   private snapFxToTargets(): void {
+    this.smoothedInputGain = this.targetInputGain
     this.smoothedDrive = this.targetDrive
     this.smoothedCrush = this.targetCrush
     this.smoothedDamp = this.targetDamp
@@ -495,6 +500,7 @@ export class GranularCore {
       this.smoothedOutputGain += (
         this.targetOutputGain - this.smoothedOutputGain
       ) * this.outputSmoothingCoefficient
+      this.smoothedInputGain += (this.targetInputGain - this.smoothedInputGain) * this.outputSmoothingCoefficient
       this.smoothedDrive += (this.targetDrive - this.smoothedDrive) * this.outputSmoothingCoefficient
       this.smoothedCrush += (this.targetCrush - this.smoothedCrush) * this.outputSmoothingCoefficient
       this.smoothedDamp += (this.targetDamp - this.smoothedDamp) * this.outputSmoothingCoefficient
@@ -576,7 +582,7 @@ export class GranularCore {
         this.age[grain] += 1
       }
 
-      const masterGain = this.smoothedOutputGain * this.modeTransitionGain
+      const masterGain = this.smoothedInputGain * this.smoothedOutputGain * this.modeTransitionGain
       let mixL = this.colorFx(left * masterGain, this.filterLeft)
       let mixR = this.colorFx(right * masterGain, this.filterRight)
 
@@ -842,6 +848,7 @@ export class GranularCore {
     const previousSeed = previousPatch.seed
     this.patch = nextPatch
     this.targetOutputGain = nextPatch.outputGain
+    this.targetInputGain = nextPatch.inputGain
     this.targetDrive = nextPatch.drive
     this.targetCrush = nextPatch.crush
     this.targetDamp = nextPatch.damp

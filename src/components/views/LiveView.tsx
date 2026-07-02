@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { HeaderSlider } from '../HeaderSlider'
 import { MacroControls } from '../MacroControls'
 import { Select } from '../select/Select'
 import { Waveform } from '../Waveform'
@@ -142,6 +143,25 @@ export function LiveView(props: LiveViewProps) {
         <span className="live-toolbar-sep" />
         <button type="button" className="file-button" onClick={props.onSaveSession}>Save session</button>
         <button type="button" className="file-button" onClick={props.onLoadSession}>Load session</button>
+        <span className="live-toolbar-sep" />
+        <HeaderSlider
+          label="Vol"
+          value={patch.outputGain}
+          min={0}
+          max={1}
+          step={0.01}
+          format={(v) => `${Math.round(v * 100)}%`}
+          onChange={(outputGain) => props.onUpdatePatch({ outputGain })}
+        />
+        <HeaderSlider
+          label="Gain"
+          value={patch.inputGain}
+          min={0}
+          max={2}
+          step={0.01}
+          format={(v) => `${Math.round(v * 100)}%`}
+          onChange={(inputGain) => props.onUpdatePatch({ inputGain })}
+        />
       </div>
     </div>
   )

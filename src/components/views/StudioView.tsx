@@ -8,6 +8,7 @@ import { AdvancedControls } from '../AdvancedControls'
 import { MacroControls } from '../MacroControls'
 import { FxRack } from '../fx/FxRack'
 import { ParameterControl } from '../ParameterControl'
+import { HeaderSlider } from '../HeaderSlider'
 import { PresetControls } from '../PresetControls'
 import { Select } from '../select/Select'
 import { ShatterSequencer } from '../ShatterSequencer'
@@ -131,6 +132,24 @@ export function StudioView(props: StudioViewProps) {
           <button className="file-button" type="button" onClick={props.onLoadSession}>
             Load session
           </button>
+          <HeaderSlider
+            label="Vol"
+            value={patch.outputGain}
+            min={0}
+            max={1}
+            step={0.01}
+            format={(v) => `${Math.round(v * 100)}%`}
+            onChange={(outputGain) => props.onUpdatePatch({ outputGain })}
+          />
+          <HeaderSlider
+            label="Gain"
+            value={patch.inputGain}
+            min={0}
+            max={2}
+            step={0.01}
+            format={(v) => `${Math.round(v * 100)}%`}
+            onChange={(inputGain) => props.onUpdatePatch({ inputGain })}
+          />
           <Select label="Source" value={props.sourceId}
             options={DEMO_SOURCES.map((s) => ({ value: s.id, label: s.label }))}
             onChange={props.onSelectSource} />

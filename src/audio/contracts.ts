@@ -104,6 +104,7 @@ export interface GrainPatch {
   window: GrainWindow
   windowSkew: number
   windowHardness: number
+  inputGain: number
   outputGain: number
   drive: number
   crush: number
@@ -173,6 +174,7 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   window: 'hann',
   windowSkew: 0,
   windowHardness: 0,
+  inputGain: 1,
   outputGain: 0.72,
   drive: 0,
   crush: 0,
@@ -215,6 +217,7 @@ export const PATCH_RANGES = Object.freeze({
   stereoSpread: [0, 1] as const,
   windowSkew: [-1, 1] as const,
   windowHardness: [0, 1] as const,
+  inputGain: [0, 2] as const,
   outputGain: [0, 1] as const,
   drive: [0, 1] as const,
   crush: [0, 1] as const,
@@ -329,6 +332,10 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
       : 'hann',
     windowSkew: clamp(candidate.windowSkew, ...PATCH_RANGES.windowSkew),
     windowHardness: clamp(candidate.windowHardness, ...PATCH_RANGES.windowHardness),
+    // Missing (old preset) → unity so the source is unchanged.
+    inputGain: Number.isFinite(candidate.inputGain)
+      ? clamp(candidate.inputGain, ...PATCH_RANGES.inputGain)
+      : DEFAULT_PATCH.inputGain,
     outputGain: clamp(candidate.outputGain, ...PATCH_RANGES.outputGain),
     drive: clamp(candidate.drive, ...PATCH_RANGES.drive),
     crush: clamp(candidate.crush, ...PATCH_RANGES.crush),

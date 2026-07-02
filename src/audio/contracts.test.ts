@@ -38,6 +38,7 @@ describe('sanitizePatch', () => {
   it('always yields exactly two sanitized LFOs and defaults invalid musical fields', () => {
     const partial = { ...DEFAULT_PATCH } as Record<string, unknown>
     delete partial.lfos
+    delete partial.inputGain
     partial.pitchQuantize = 'bogus'
     partial.window = 'nonsense'
     partial.windowSkew = 5
@@ -47,6 +48,7 @@ describe('sanitizePatch', () => {
     expect(patch.pitchQuantize).toBe('off')
     expect(patch.window).toBe('hann')
     expect(patch.windowSkew).toBe(1) // clamped to range max
+    expect(patch.inputGain).toBe(1) // missing → unity
   })
 
   it('accepts the morph window and a valid scatter scale', () => {
