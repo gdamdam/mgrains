@@ -18,6 +18,14 @@ import { VoiceAllocator } from './instrument/voiceAllocator'
 import { MotionRecorder, resolvePresetMotion, type MotionData } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import {
+  deserializeSession,
+  readLastSession,
+  serializeSession,
+  writeLastSession,
+  type Session,
+} from './storage/session'
+import { SessionBanner } from './components/SessionBanner'
+import {
   AbletonLinkClient,
   initialLinkState,
   LINK_QUANTUM,
@@ -122,6 +130,11 @@ export default function App() {
       return next
     })
   }, [])
+  // The auto-saved last session, captured once at mount, offered via a banner
+  // until the user continues or dismisses it. Autosave holds off until then so a
+  // fresh page's default state can't overwrite it before the user chooses.
+  const [pendingSession, setPendingSession] = useState<Session | null>(readLastSession)
+  const sessionFileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => () => {
     void engineRef.current?.close()
@@ -202,6 +215,18 @@ export default function App() {
   useEffect(() => {
     pitchBendRangeRef.current = patch.pitchBendRange
   }, [patch.pitchBendRange])
+
+  // Auto-persist the working state (debounced) so it can be restored next launch.
+  // Held off while a restore banner is pending so a fresh default state can't
+  // clobber the stored session before the user continues or dismisses.
+  useEffect(() => {
+    if (pendingSession) return
+    const handle = window.setTimeout(() => {
+      const motion = hasMotion ? motionRef.current.serialize() : undefined
+      writeLastSession(serializeSession(patch, viewMode, epochMs(), { motion, sourceLabel }))
+    }, 500)
+    return () => window.clearTimeout(handle)
+  }, [patch, viewMode, sourceLabel, hasMotion, pendingSession])
 
   // Cancel any in-flight motion loop on unmount.
   useEffect(() => () => {
@@ -435,6 +460,46 @@ export default function App() {
     presetStoreRef.current.delete(name).then(refreshPresets).catch(() => { /* ignore */ })
   }
 
+  // Restore a full session (from the Continue banner or an imported file). Same
+  // path for both: swap patch + motion + view, and prompt a relink if the saved
+  // source differs, mirroring loadPreset.
+  const applySession = (session: Session) => {
+    applyPatch(session.patch)
+    applyPresetMotion(session.motion)
+    setViewMode(session.viewMode)
+    writeViewMode(session.viewMode)
+    if (session.sourceLabel && session.sourceLabel !== sourceLabel) {
+      setError(`Session was saved with source "${session.sourceLabel}". Load that source to match its motion and position.`)
+    }
+  }
+
+  const continueLastSession = () => {
+    if (pendingSession) applySession(pendingSession)
+    setPendingSession(null)
+  }
+
+  const saveSessionFile = () => {
+    const motion = hasMotion ? motionRef.current.serialize() : undefined
+    const session = serializeSession(patch, viewMode, epochMs(), { motion, sourceLabel })
+    const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `mgrains-session-${session.savedAt}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const onSessionFileChange = (file: File | undefined) => {
+    if (!file) return
+    file.text()
+      .then((text) => {
+        applySession(deserializeSession(JSON.parse(text)))
+        setPendingSession(null)
+      })
+      .catch(() => setError('Could not read that session file.'))
+  }
+
   const toggleLink = () => {
     const client = linkClientRef.current
     if (linkEnabled) {
@@ -657,9 +722,35 @@ export default function App() {
     setFrozen(false)
   }, [engineState])
 
+  // Session chrome shared by both views: the Continue banner (when a last session
+  // exists) and the hidden file input backing "Load session".
+  const sessionChrome = (
+    <>
+      {pendingSession && (
+        <SessionBanner
+          sourceLabel={pendingSession.sourceLabel}
+          onContinue={continueLastSession}
+          onDismiss={() => setPendingSession(null)}
+        />
+      )}
+      <input
+        ref={sessionFileInputRef}
+        type="file"
+        accept="application/json,.json"
+        hidden
+        onChange={(event) => {
+          onSessionFileChange(event.currentTarget.files?.[0])
+          event.currentTarget.value = ''
+        }}
+      />
+    </>
+  )
+  const openSessionFile = () => sessionFileInputRef.current?.click()
+
   if (viewMode === 'live') {
     return (
       <main className={`app app--${patch.mode} view-${viewMode}`}>
+        {sessionChrome}
         <LiveView
           patch={patch}
           engineState={engineState}
@@ -697,6 +788,8 @@ export default function App() {
           onClearMotion={clearMotion}
           onMutate={mutate}
           onUndo={undo}
+          onSaveSession={saveSessionFile}
+          onLoadSession={openSessionFile}
         />
       </main>
     )
@@ -704,6 +797,7 @@ export default function App() {
 
   return (
     <main className={`app app--${patch.mode} view-${viewMode}`}>
+      {sessionChrome}
       <StudioView
         patch={patch}
         engineState={engineState}
@@ -760,6 +854,8 @@ export default function App() {
         onLoadPreset={loadPreset}
         onLoadFactoryPreset={loadFactory}
         onDeletePreset={deletePreset}
+        onSaveSession={saveSessionFile}
+        onLoadSession={openSessionFile}
       />
     </main>
   )

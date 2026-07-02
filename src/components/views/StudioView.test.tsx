@@ -62,6 +62,8 @@ const studioProps = {
   onLoadPreset: noop,
   onLoadFactoryPreset: noop,
   onDeletePreset: noop,
+  onSaveSession: noop,
+  onLoadSession: noop,
 }
 
 describe('StudioView', () => {

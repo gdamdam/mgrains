@@ -14,7 +14,7 @@ export const baseProps = {
   onToggleView: noop, onChangeMode: noop, onUpdatePatch: noop, onXYChange: noop, onSetMacro: noop,
   onToggleMacroLink: noop, onToggleKeys: noop, onToggleLink: noop, onSelectSource: noop, onWaveformPosition: noop,
   onRecordMotion: noop, onFinishRecording: noop, onPlayMotion: noop, onStopMotion: noop, onClearMotion: noop,
-  onMutate: noop, onUndo: noop,
+  onMutate: noop, onUndo: noop, onSaveSession: noop, onLoadSession: noop,
 }
 
 describe('LiveView', () => {

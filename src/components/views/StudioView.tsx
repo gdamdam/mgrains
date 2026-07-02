@@ -101,6 +101,8 @@ interface StudioViewProps {
   onLoadPreset: (name: string) => void
   onLoadFactoryPreset: (name: string) => void
   onDeletePreset: (name: string) => void
+  onSaveSession: () => void
+  onLoadSession: () => void
 }
 
 export function StudioView(props: StudioViewProps) {
@@ -122,6 +124,12 @@ export function StudioView(props: StudioViewProps) {
         <div className="source-actions">
           <button className="file-button" type="button" onClick={props.onToggleView}>
             ◂ Live
+          </button>
+          <button className="file-button" type="button" onClick={props.onSaveSession}>
+            Save session
+          </button>
+          <button className="file-button" type="button" onClick={props.onLoadSession}>
+            Load session
           </button>
           <Select label="Source" value={props.sourceId}
             options={DEMO_SOURCES.map((s) => ({ value: s.id, label: s.label }))}

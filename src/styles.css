@@ -195,6 +195,23 @@ button.file-button:disabled {
   background: var(--accent);
 }
 
+.session-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.session-banner-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
 .file-button input {
   position: absolute;
   width: 1px;

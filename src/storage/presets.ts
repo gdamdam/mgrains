@@ -93,7 +93,7 @@ export function deserializePreset(raw: unknown): Preset {
 // Accept only a well-formed MotionData: an object with an array `samples` of
 // { tMs, value } finite numbers and a finite `durationMs`. Returns a defensive
 // clone, or undefined for anything malformed. Never throws.
-function parseMotion(value: unknown): MotionData | undefined {
+export function parseMotion(value: unknown): MotionData | undefined {
   if (!isRecord(value)) return undefined
   if (!Array.isArray(value.samples)) return undefined
   if (!Number.isFinite(value.durationMs)) return undefined
@@ -108,7 +108,7 @@ function parseMotion(value: unknown): MotionData | undefined {
   return { samples, durationMs: value.durationMs as number }
 }
 
-function parseSourceLabel(value: unknown): string | undefined {
+export function parseSourceLabel(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
@@ -118,7 +118,7 @@ function coerceName(value: unknown): string {
   return trimmed.length > 0 ? trimmed : DEFAULT_PRESET_NAME
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 

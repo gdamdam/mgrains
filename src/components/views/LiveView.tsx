@@ -52,6 +52,8 @@ interface LiveViewProps {
   onClearMotion: () => void
   onMutate: () => void
   onUndo: () => void
+  onSaveSession: () => void
+  onLoadSession: () => void
 }
 
 export function LiveView(props: LiveViewProps) {
@@ -137,6 +139,9 @@ export function LiveView(props: LiveViewProps) {
         <span className="live-toolbar-sep" />
         <button type="button" className="file-button" onClick={props.onMutate}>Mutate</button>
         <button type="button" className="file-button" disabled={!props.canUndo} onClick={props.onUndo}>Undo</button>
+        <span className="live-toolbar-sep" />
+        <button type="button" className="file-button" onClick={props.onSaveSession}>Save session</button>
+        <button type="button" className="file-button" onClick={props.onLoadSession}>Load session</button>
       </div>
     </div>
   )
