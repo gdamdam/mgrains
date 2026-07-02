@@ -10,6 +10,7 @@ export const baseProps = {
   activeGrains: 0, grainVisuals: { count: 0, positions: new Float32Array(0), intensities: new Float32Array(0) },
   macroValues: {}, linkedMacros: {}, keysActive: false, linkEnabled: false,
   motionState: 'idle' as const, hasMotion: false, canUndo: false,
+  onStartAudio: noop,
   onToggleView: noop, onChangeMode: noop, onUpdatePatch: noop, onXYChange: noop, onSetMacro: noop,
   onToggleMacroLink: noop, onToggleKeys: noop, onToggleLink: noop, onSelectSource: noop, onWaveformPosition: noop,
   onRecordMotion: noop, onFinishRecording: noop, onPlayMotion: noop, onStopMotion: noop, onClearMotion: noop,
@@ -26,5 +27,10 @@ describe('LiveView', () => {
     expect(html).not.toContain('advanced-panel')  // no advanced panel
     expect(html).not.toContain('preset-controls') // no presets
     expect(html).toContain('role="combobox"')     // the Source picker trigger
+  })
+
+  it('offers an immediate audio start action when the engine is idle', () => {
+    const html = renderToStaticMarkup(<LiveView {...baseProps} engineState="idle" />)
+    expect(html).toContain('Tap to start audio')
   })
 })

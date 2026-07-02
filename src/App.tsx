@@ -13,7 +13,7 @@ import { FACTORY_PRESETS } from './audio/factoryPresets'
 import { applyMacro } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
 import { MidiInput } from './instrument/midi'
-import { controlForKey, isEditableTarget, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
+import { controlForKey, hasCommandModifier, isEditableTarget, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
 import { VoiceAllocator } from './instrument/voiceAllocator'
 import { MotionRecorder, resolvePresetMotion, type MotionData } from './performance/motion'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
@@ -216,6 +216,14 @@ export default function App() {
     )
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return
+      // Never hijack browser/OS shortcuts. Releasing QWERTY voices here also
+      // prevents a stuck note when macOS suppresses the letter keyup in a Cmd
+      // chord; MIDI voices remain untouched.
+      if (hasCommandModifier(event)) {
+        if (alloc.releaseOwnerPrefix('kbd')) pushNotes()
+        codeToNote.clear()
+        return
+      }
       // Don't capture keystrokes meant for a text field / select (e.g. the preset
       // name box). Releases of already-held keys still flow through onKeyUp below,
       // which is focus-agnostic, so notes started before the focus moved still stop.
@@ -662,6 +670,7 @@ export default function App() {
           motionState={motionState}
           hasMotion={hasMotion}
           canUndo={canUndo}
+          onStartAudio={() => void startAudio()}
           onToggleView={toggleViewMode}
           onChangeMode={changeMode}
           onUpdatePatch={updatePatch}

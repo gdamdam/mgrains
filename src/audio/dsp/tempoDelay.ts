@@ -34,6 +34,7 @@ const DEFAULT_MAX_SECONDS = 2.5
 // only bites once echoes pile up, adding a touch of compression that further
 // helps stability without obviously distorting a single repeat.
 const LOOP_DRIVE = 0.15
+const LOOP_DRIVE_GAIN = 1 + LOOP_DRIVE * 9
 
 const HALF_PI = Math.PI / 2
 
@@ -145,10 +146,10 @@ export class TempoDelay {
     }
 
     // Feedback path: damp (LPF) then soft-saturate, mirroring mdrone's
-    // fbFilter → fbSat loop. softClipDrive keeps the loop bounded even before
-    // the feedback gain, so a clamped feedback can never run away.
-    const fbL = softClipDrive(this.toneLeft.process(delayedL), LOOP_DRIVE)
-    const fbR = softClipDrive(this.toneRight.process(delayedR), LOOP_DRIVE)
+    // fbFilter → fbSat loop. Normalize by the saturator's small-signal gain so
+    // feedback below 1 always decays instead of settling into self-oscillation.
+    const fbL = softClipDrive(this.toneLeft.process(delayedL), LOOP_DRIVE) / LOOP_DRIVE_GAIN
+    const fbR = softClipDrive(this.toneRight.process(delayedR), LOOP_DRIVE) / LOOP_DRIVE_GAIN
 
     // Ping-pong: at width 0 each channel feeds straight back into itself; at
     // width 1 the feedback crosses fully to the opposite channel, bouncing the

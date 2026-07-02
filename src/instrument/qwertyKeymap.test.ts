@@ -4,6 +4,7 @@ import {
   OCTAVE_KEYS,
   VELOCITY_KEYS,
   controlForKey,
+  hasCommandModifier,
   isEditableTarget,
   isNoteKey,
   keyToSemitone,
@@ -41,6 +42,18 @@ describe('isNoteKey', () => {
 
   it('is false for a control key', () => {
     expect(isNoteKey('KeyZ')).toBe(false)
+  })
+})
+
+describe('hasCommandModifier', () => {
+  it('recognizes browser and OS shortcut modifiers', () => {
+    expect(hasCommandModifier({ metaKey: true, ctrlKey: false, altKey: false })).toBe(true)
+    expect(hasCommandModifier({ metaKey: false, ctrlKey: true, altKey: false })).toBe(true)
+    expect(hasCommandModifier({ metaKey: false, ctrlKey: false, altKey: true })).toBe(true)
+  })
+
+  it('allows unmodified instrument keys', () => {
+    expect(hasCommandModifier({ metaKey: false, ctrlKey: false, altKey: false })).toBe(false)
   })
 })
 

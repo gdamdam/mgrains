@@ -6,6 +6,7 @@ import { XYPad } from '../XYPad'
 import { Dial } from '../dial/Dial'
 import { DEMO_SOURCES } from '../../audio/demoSource'
 import type { GrainMode, GrainPatch } from '../../audio/contracts'
+import type { AudioEngineState } from '../../audio/AudioEngine'
 
 // Preserve App's perf boundary: this view re-renders on ~30 Hz telemetry (peak,
 // grain visuals — App state, not patch), but XY pad + macros depend only on
@@ -16,7 +17,7 @@ const MacroControlsMemo = memo(MacroControls)
 interface GrainVisualState { count: number; positions: Float32Array; intensities: Float32Array }
 interface LiveViewProps {
   patch: GrainPatch
-  engineState: string
+  engineState: AudioEngineState
   peak: number
   peaks: Float32Array | null
   sourceLabel: string
@@ -33,6 +34,7 @@ interface LiveViewProps {
   motionState: 'idle' | 'recording' | 'playing'
   hasMotion: boolean
   canUndo: boolean
+  onStartAudio: () => void
   onToggleView: () => void
   onChangeMode: (mode: GrainMode) => void
   onUpdatePatch: (changes: Partial<GrainPatch>) => void
@@ -79,6 +81,15 @@ export function LiveView(props: LiveViewProps) {
           <button type="button" className="studio-toggle" onClick={props.onToggleView}>Studio ▸</button>
         </span>
       </div>
+      {props.engineState !== 'running' && (
+        <div className="live-start" role="status">
+          <p>Start the audio engine to play mgrains.</p>
+          <button type="button" className="audio-button" onClick={props.onStartAudio}
+            disabled={props.engineState === 'starting'}>
+            {props.engineState === 'starting' ? 'Starting…' : 'Tap to start audio'}
+          </button>
+        </div>
+      )}
       <p className="live-hint">Shape FX, sequencer &amp; advanced in Studio ▸</p>
 
       <Waveform

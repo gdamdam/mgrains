@@ -105,6 +105,20 @@ describe('TempoDelay', () => {
     expect(peak).toBeLessThan(4)
   })
 
+  it('decays to silence at maximum feedback instead of self-oscillating', () => {
+    const delay = new TempoDelay(SR)
+    delay.setParams({ timeSeconds: 0.003, feedback: 0.95, tone: 0, width: 0 })
+    delay.process(1, 1)
+
+    let latePeak = 0
+    for (let i = 0; i < SR * 2; i += 1) {
+      const [left] = delay.process(0, 0)
+      if (i >= SR) latePeak = Math.max(latePeak, Math.abs(left))
+    }
+
+    expect(latePeak).toBeLessThan(1e-4)
+  })
+
   it('tone at 1 (dark) yields less HF in the echoes than tone 0', () => {
     const timeSeconds = 0.004
     const tail = Math.round(timeSeconds * SR) * 6 + 10

@@ -55,6 +55,13 @@ export function isNoteKey(code: string): boolean {
   return Object.prototype.hasOwnProperty.call(KEY_TO_SEMITONE, code)
 }
 
+/** True when the keystroke belongs to an OS/browser shortcut chord. */
+export function hasCommandModifier(
+  event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey'>,
+): boolean {
+  return event.metaKey || event.ctrlKey || event.altKey
+}
+
 /**
  * True when a keyboard event targets an editable control (text input, textarea,
  * select, or contenteditable). The QWERTY instrument must not capture keystrokes
