@@ -162,6 +162,11 @@ export class AudioEngine {
     this.send({ type: 'set-pitch-bend', semitones })
   }
 
+  // When gated, grains spawn only while a note is held (no autonomous drone).
+  setGateToNotes(gated: boolean): void {
+    this.send({ type: 'set-gate-to-notes', gated })
+  }
+
   setSource(source: AudioSourceData): void {
     this.stopLiveInput()
     const left = source.left.slice()

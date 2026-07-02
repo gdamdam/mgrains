@@ -287,6 +287,8 @@ export type MainToEngineMessage =
   | { type: 'clear-source' }
   | { type: 'set-notes'; notes: { offset: number; velocity: number }[] }
   | { type: 'set-pitch-bend'; semitones: number }
+  // When gated, grains only spawn while a note is held (no autonomous drone).
+  | { type: 'set-gate-to-notes'; gated: boolean }
   | { type: 'reset'; seed?: number }
   // Ableton Link bar alignment: land shatter step 0 on the shared downbeat at this
   // AudioContext timestamp (the shared audio clock). The worklet maps it to the

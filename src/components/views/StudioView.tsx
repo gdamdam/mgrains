@@ -104,6 +104,8 @@ interface StudioViewProps {
   onDeletePreset: (name: string) => void
   onSaveSession: () => void
   onLoadSession: () => void
+  gateToNotes: boolean
+  onToggleGate: () => void
 }
 
 export function StudioView(props: StudioViewProps) {
@@ -190,6 +192,15 @@ export function StudioView(props: StudioViewProps) {
             onClick={props.onToggleKeys}
           >
             {props.keysActive ? 'Keys on' : 'Play keys'}
+          </button>
+          <button
+            className={`file-button ${props.gateToNotes ? 'is-active' : ''}`}
+            type="button"
+            aria-pressed={props.gateToNotes}
+            title="Mute the autonomous drone/pattern; sound only while a note is held"
+            onClick={props.onToggleGate}
+          >
+            {props.gateToNotes ? 'Notes only' : 'Auto-play'}
           </button>
           <button
             className={`file-button ${props.linkEnabled ? 'is-active' : ''}`}

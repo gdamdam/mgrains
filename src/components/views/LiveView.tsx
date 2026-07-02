@@ -55,6 +55,8 @@ interface LiveViewProps {
   onUndo: () => void
   onSaveSession: () => void
   onLoadSession: () => void
+  gateToNotes: boolean
+  onToggleGate: () => void
 }
 
 export function LiveView(props: LiveViewProps) {
@@ -77,6 +79,9 @@ export function LiveView(props: LiveViewProps) {
         <span className="live-source">{props.sourceLabel}</span>
         <span className="live-actions">
           <button type="button" className={`file-button ${props.keysActive ? 'is-active' : ''}`} onClick={props.onToggleKeys}>Keys</button>
+          <button type="button" className={`file-button ${props.gateToNotes ? 'is-active' : ''}`}
+            title="Mute the autonomous drone/pattern; sound only while a note is held"
+            onClick={props.onToggleGate}>{props.gateToNotes ? 'Notes only' : 'Auto-play'}</button>
           <button type="button" className={`file-button ${props.linkEnabled ? 'is-active' : ''}`} onClick={props.onToggleLink}>Link</button>
           <Select label="Source" value={props.sourceId}
             options={DEMO_SOURCES.map((s) => ({ value: s.id, label: s.label }))}

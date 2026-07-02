@@ -145,6 +145,9 @@ export class GranularCore {
   private readonly activeNotes = new Float64Array(8)
   private readonly activeVelocities = new Float64Array(8)
   private activeNoteCount = 0
+  // When true, grains only spawn while a note is held — the autonomous
+  // drone/pattern is muted so the instrument plays from the keyboard/MIDI only.
+  private gateToNotes = false
 
   // Pitch bend (semitones, smoothed) applied globally to every voice, and a
   // last-note glide that ramps the played pitch when glideTime > 0.
@@ -773,10 +776,20 @@ export class GranularCore {
     this.targetPitchBend = Number.isFinite(semitones) ? semitones : 0
   }
 
+  // Gate spawning to held notes only. Held grains finish their envelope
+  // naturally; only new autonomous spawns are suppressed, so toggling is clickless.
+  setGateToNotes(gated: boolean): void {
+    this.gateToNotes = gated === true
+  }
+
   // Spawn one grain per held note (transposed by note + extraSemitones, scaled by
   // the note's velocity), or a single full-velocity grain at the base pitch.
   private spawnVoices(extraSemitones: number, forceReverse: boolean): void {
     if (this.activeNoteCount === 0) {
+      // Gated with nothing held → stay silent (covers both bloom and shatter,
+      // which both route unheld spawns through here). The scheduler still
+      // advances, so the drone/pattern resumes the moment a note arrives.
+      if (this.gateToNotes) return
       this.spawnGrain(extraSemitones, forceReverse)
       return
     }

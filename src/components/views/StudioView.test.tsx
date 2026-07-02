@@ -64,6 +64,8 @@ const studioProps = {
   onDeletePreset: noop,
   onSaveSession: noop,
   onLoadSession: noop,
+  gateToNotes: false,
+  onToggleGate: noop,
 }
 
 describe('StudioView', () => {

@@ -50,6 +50,20 @@ describe('GranularCore', () => {
     expect(core.activeGrainCount).toBeLessThanOrEqual(16)
   })
 
+  it('gates spawning to held notes when gateToNotes is on', () => {
+    const source = makeSource()
+    const core = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    core.setSource(source, source)
+    core.setGateToNotes(true)
+
+    // No note held → the autonomous drone is muted, output is pure silence.
+    expect(render(core).every((sample) => sample === 0)).toBe(true)
+
+    // Holding a note re-enables sound on the same gated core.
+    core.setActiveNotes([{ offset: 0, velocity: 1 }])
+    expect(render(core).some((sample) => sample !== 0)).toBe(true)
+  })
+
   it('renders deterministically for the same patch and seed', () => {
     const source = makeSource()
     const first = new GranularCore({ sampleRate: 44_100 })

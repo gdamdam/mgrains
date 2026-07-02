@@ -103,6 +103,9 @@ export default function App() {
   const [motionState, setMotionState] = useState<'idle' | 'recording' | 'playing'>('idle')
   const [hasMotion, setHasMotion] = useState(false)
   const [keysActive, setKeysActive] = useState(false)
+  // When on, the autonomous drone/pattern is muted — the instrument only sounds
+  // while a QWERTY or MIDI note is held.
+  const [gateToNotes, setGateToNotes] = useState(false)
   const octaveRef = useRef(0)
   const heldNotesRef = useRef<Map<string, number>>(new Map())
   const voiceAllocatorRef = useRef(new VoiceAllocator(8))
@@ -215,6 +218,12 @@ export default function App() {
   useEffect(() => {
     pitchBendRangeRef.current = patch.pitchBendRange
   }, [patch.pitchBendRange])
+
+  // Push the note-gate toggle to the engine when it changes (a fresh start also
+  // seeds it in startAudio, for the case it was toggled before audio began).
+  useEffect(() => {
+    engineRef.current?.setGateToNotes(gateToNotes)
+  }, [gateToNotes])
 
   // Auto-persist the working state (debounced) so it can be restored next launch.
   // Held off while a restore banner is pending so a fresh default state can't
@@ -611,6 +620,7 @@ export default function App() {
       setSourceMode('sample')
       setFrozen(false)
       engine.setPatch(patch)
+      engine.setGateToNotes(gateToNotes)
       engine.setSource(source)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The audio engine could not start.')
@@ -767,10 +777,12 @@ export default function App() {
           linkedMacros={linkedMacros}
           keysActive={keysActive}
           linkEnabled={linkEnabled}
+          gateToNotes={gateToNotes}
           motionState={motionState}
           hasMotion={hasMotion}
           canUndo={canUndo}
           onStartAudio={() => void startAudio()}
+          onToggleGate={() => setGateToNotes((value) => !value)}
           onToggleView={toggleViewMode}
           onChangeMode={changeMode}
           onUpdatePatch={updatePatch}
@@ -820,11 +832,13 @@ export default function App() {
         linkEnabled={linkEnabled}
         linkState={linkState}
         keysActive={keysActive}
+        gateToNotes={gateToNotes}
         canUndo={canUndo}
         motionState={motionState}
         hasMotion={hasMotion}
         liveInputPending={liveInputPending}
         onToggleView={toggleViewMode}
+        onToggleGate={() => setGateToNotes((value) => !value)}
         onChangeMode={changeMode}
         onUpdatePatch={updatePatch}
         onXYChange={handleXYChange}
