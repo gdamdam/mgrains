@@ -39,6 +39,12 @@ export class AudioEngine {
     return this.context?.currentTime ?? null
   }
 
+  // Full processed output (post-limiter, pre-destination) for publishing to
+  // the mbus patchbay. null until the engine is running.
+  getMasterTap(): AudioNode | null {
+    return this.limiter
+  }
+
   // Anchor the shatter sequence's step 0 to a shared Link downbeat `secondsFromNow`
   // away. Sent as an absolute AudioContext timestamp so the worklet maps it to its
   // frame clock precisely. No-op until the engine is running.

@@ -66,6 +66,7 @@ interface StudioViewProps {
   factory: ReadonlyArray<FactoryPreset>
   presetName: string
   linkEnabled: boolean
+  busEnabled: boolean
   linkState: LinkState
   keysActive: boolean
   canUndo: boolean
@@ -84,6 +85,7 @@ interface StudioViewProps {
   onUndo: () => void
   onToggleKeys: () => void
   onToggleLink: () => void
+  onToggleBus: () => void
   onStartAudio: () => void
   onLoadFile: (file: File | undefined) => void
   onLiveInput: () => void
@@ -209,6 +211,15 @@ export function StudioView(props: StudioViewProps) {
             onClick={props.onToggleLink}
           >
             {props.linkEnabled ? 'Link on' : 'Link'}
+          </button>
+          <button
+            className={`file-button ${props.busEnabled ? 'is-active' : ''}`}
+            type="button"
+            aria-pressed={props.busEnabled}
+            title="Publish the master output to the mbus patchbay (needs the local link-bridge; harmless without it)"
+            onClick={props.onToggleBus}
+          >
+            {props.busEnabled ? 'Bus on' : 'Bus'}
           </button>
           <button
             className="audio-button"

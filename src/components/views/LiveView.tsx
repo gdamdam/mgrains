@@ -32,6 +32,7 @@ interface LiveViewProps {
   linkedMacros: Record<string, boolean>
   keysActive: boolean
   linkEnabled: boolean
+  busEnabled: boolean
   motionState: 'idle' | 'recording' | 'playing'
   hasMotion: boolean
   canUndo: boolean
@@ -44,6 +45,7 @@ interface LiveViewProps {
   onToggleMacroLink: (id: string) => void
   onToggleKeys: () => void
   onToggleLink: () => void
+  onToggleBus: () => void
   onSelectSource: (id: string) => void
   onWaveformPosition: (position: number) => void
   onRecordMotion: () => void
@@ -83,6 +85,9 @@ export function LiveView(props: LiveViewProps) {
             title="Mute the autonomous drone/pattern; sound only while a note is held"
             onClick={props.onToggleGate}>{props.gateToNotes ? 'Notes only' : 'Auto-play'}</button>
           <button type="button" className={`file-button ${props.linkEnabled ? 'is-active' : ''}`} onClick={props.onToggleLink}>Link</button>
+          <button type="button" className={`file-button ${props.busEnabled ? 'is-active' : ''}`}
+            title="Publish the master output to the mbus patchbay (needs the local link-bridge; harmless without it)"
+            onClick={props.onToggleBus}>{props.busEnabled ? 'Bus on' : 'Bus'}</button>
           <Select label="Source" value={props.sourceId}
             options={DEMO_SOURCES.map((s) => ({ value: s.id, label: s.label }))}
             onChange={props.onSelectSource} />

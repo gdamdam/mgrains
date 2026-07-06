@@ -32,6 +32,7 @@ import {
   secondsUntilDownbeat,
   type LinkState,
 } from './transport/abletonLink'
+import { createMbusClient, type MbusClient, type Publication } from './transport/mbus'
 import { readViewMode, writeViewMode, type ViewMode } from './ui/viewMode'
 import { LiveView } from './components/views/LiveView'
 import { StudioView } from './components/views/StudioView'
@@ -116,6 +117,13 @@ export default function App() {
   const linkEnabledRef = useRef(false)
   const [linkEnabled, setLinkEnabled] = useState(false)
   const [linkState, setLinkState] = useState<LinkState>(initialLinkState())
+  // mbus publish (see src/transport/mbus): offer the master output to the mbus
+  // patchbay over the same local link-bridge. Off by default and session-
+  // transient; until enabled no client exists and no socket is opened.
+  const mbusClientRef = useRef<MbusClient | null>(null)
+  const mbusPubRef = useRef<Publication | null>(null)
+  const mbusTapRef = useRef<AudioNode | null>(null)
+  const [busEnabled, setBusEnabled] = useState(false)
   // Latest patch mode, read from the Link callback without re-subscribing.
   const patchModeRef = useRef(patch.mode)
   const pitchBendRangeRef = useRef(patch.pitchBendRange)
@@ -522,6 +530,27 @@ export default function App() {
     }
   }
 
+  const toggleBus = () => setBusEnabled((value) => !value)
+
+  // Reconcile the bus intent with the live graph. Re-runs when the engine
+  // (re)starts or closes so the publication always feeds the current limiter;
+  // disable unannounces the source and drops the bridge socket.
+  useEffect(() => {
+    const tap = engineRef.current?.getMasterTap() ?? null
+    if (mbusPubRef.current && (mbusTapRef.current !== tap || !busEnabled)) {
+      mbusPubRef.current.stop()
+      mbusPubRef.current = null
+      mbusTapRef.current = null
+    }
+    if (busEnabled && tap && !mbusPubRef.current) {
+      mbusClientRef.current ??= createMbusClient()
+      mbusClientRef.current.connect()
+      mbusPubRef.current = mbusClientRef.current.publishOutput(tap, 'mgrains')
+      mbusTapRef.current = tap
+    }
+    if (!busEnabled) mbusClientRef.current?.disconnect()
+  }, [busEnabled, engineState])
+
   const cancelMotionLoop = () => {
     if (motionRafRef.current !== null) {
       cancelAnimationFrame(motionRafRef.current)
@@ -777,6 +806,7 @@ export default function App() {
           linkedMacros={linkedMacros}
           keysActive={keysActive}
           linkEnabled={linkEnabled}
+          busEnabled={busEnabled}
           gateToNotes={gateToNotes}
           motionState={motionState}
           hasMotion={hasMotion}
@@ -791,6 +821,7 @@ export default function App() {
           onToggleMacroLink={toggleMacroLink}
           onToggleKeys={() => setKeysActive((value) => !value)}
           onToggleLink={toggleLink}
+          onToggleBus={toggleBus}
           onSelectSource={onSelectSource}
           onWaveformPosition={(position) => updatePatch({ position })}
           onRecordMotion={recordMotion}
@@ -830,6 +861,7 @@ export default function App() {
         factory={FACTORY_PRESETS}
         presetName={presetName}
         linkEnabled={linkEnabled}
+        busEnabled={busEnabled}
         linkState={linkState}
         keysActive={keysActive}
         gateToNotes={gateToNotes}
@@ -850,6 +882,7 @@ export default function App() {
         onUndo={undo}
         onToggleKeys={() => setKeysActive((value) => !value)}
         onToggleLink={toggleLink}
+        onToggleBus={toggleBus}
         onStartAudio={() => void startAudio()}
         onLoadFile={(file) => void loadFile(file)}
         onLiveInput={() => void startLiveInput()}

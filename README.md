@@ -31,7 +31,7 @@
 - **Performance** — large XY surface, draggable waveform position, a one-lane **motion recorder** (record / play / clear), and seeded **Mutate** with bounded **Undo**.
 - **Play it** — polyphonic chromatic playing from the computer keyboard (Ableton layout) and **Web MIDI** (note on/off + velocity), up to 8 voices with oldest-note stealing.
 - **Shatter sequencer** — BPM, straight/dotted/triplet divisions, and a deterministic 16-step lane (gate, probability, pitch offset, reverse, ratchet).
-- **Presets & sync** — 10 curated factory presets plus user presets in IndexedDB (versioned, motion + source-label aware, with a relink prompt); optional **Ableton Link** tempo sync via the companion **mpump** link-bridge.
+- **Presets & sync** — 10 curated factory presets plus user presets in IndexedDB (versioned, motion + source-label aware, with a relink prompt); optional **Ableton Link** tempo sync via the companion **mpump** link-bridge; optional **mbus publish** — the "Bus" toggle next to Link offers the master output to the [mbus](https://mbus.mpump.live) patchbay as a source named `mgrains` (tab-to-tab WebRTC via the same bridge, off by default, harmless without it).
 - **PWA** — installable manifest and a network-first service worker that precaches the hashed app assets (full offline use after one visit, deploy-safe updates).
 
 ## Run locally
@@ -111,6 +111,7 @@ Tests are deterministic and live next to the code (DSP core, effects, contracts,
 - Headless/automated browsers may expose no audio device; the app times out with an actionable error instead of hanging.
 - A PWA install does **not** provide background or lock-screen audio.
 - Ableton Link sync requires the companion **mpump link-bridge** running locally (`ws://localhost:19876`); without it the Link panel simply shows "searching".
+- **mbus publish** rides the same link-bridge; without it the "Bus" toggle just keeps retrying quietly and nothing is published. Audio flows tab-to-tab over WebRTC and never leaves the machine.
 
 ## Physical-device QA checklist
 
@@ -157,6 +158,7 @@ src/
   performance/motion.ts         deterministic one-lane motion recorder
   storage/presets.ts            versioned preset serialize/migrate + IndexedDB store
   transport/abletonLink.ts      Ableton Link bridge WebSocket client
+  transport/mbus/               vendored mbus-client (patchbay publish; see its index.ts header)
   components/                   waveform, XY pad, parameter/macro/preset controls
     fx/                         FX bar, modal, SVG curves, FX rack
 public/                         manifest, service worker, app icon, CNAME
