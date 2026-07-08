@@ -794,13 +794,22 @@ export class GranularCore {
       this.patch.bpm,
       this.patch.shatterDivision,
     )
-    // Shatter's real spawn rate is the step clock (bpm/division × ratchet),
-    // not the bloom density control — gain normalization must use it.
+    // Shatter's real spawn rate is the step clock (bpm/division × ratchet), not
+    // the bloom density control — gain normalization uses the NOMINAL step
+    // interval (swing shifts onsets only; feeding swung frames here would flutter
+    // per-grain gain between even/odd steps).
     this.spawnIntervalFrames = Math.max(1, stepFrames / step.ratchet)
     const shouldSpawn = step.enabled && this.rng.nextFloat() <= step.probability
     if (shouldSpawn) this.spawnVoices(step.pitchOffsetSemitones, step.reverse, step.positionOffset, step.sizeScale)
 
-    this.nextGrainFrame += Math.max(1, stepFrames / step.ratchet)
+    // Swing: delay odd-index onsets. The interval leading OUT of an even step is
+    // stretched by +delta (pushing the next odd step late); out of an odd step it
+    // is compressed by −delta (returning the next even step to grid). Ratchets
+    // subdivide the swung interval; step 0 is even, so it is never swung, which
+    // keeps the Link bar anchor (always step 0) exactly on the downbeat.
+    const delta = stepFrames * this.patch.shatterSwing * 0.5
+    const swungStepFrames = this.shatterStepIndex % 2 === 0 ? stepFrames + delta : stepFrames - delta
+    this.nextGrainFrame += Math.max(1, swungStepFrames / step.ratchet)
     this.shatterRatchetIndex += 1
     if (this.shatterRatchetIndex >= step.ratchet) {
       this.shatterRatchetIndex = 0

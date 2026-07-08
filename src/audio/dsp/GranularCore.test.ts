@@ -723,3 +723,77 @@ describe('GranularCore shatter per-step position/size', () => {
     expect(g4).toBeCloseTo(g1 * 0.5, 3)
   })
 })
+
+describe('GranularCore shatter swing', () => {
+  // Local copy of the frame-accurate driver used by the Link-alignment suite.
+  function driveShatter(core: GranularCore, frames: number) {
+    const events: { frame: number; step: number }[] = []
+    for (let i = 0; i < frames; i += 1) {
+      const startFrame = core.currentFrame
+      const result = core.process(new Float32Array(1), new Float32Array(1))
+      if (result.spawnedGrains > 0) events.push({ frame: startFrame, step: result.currentStep })
+    }
+    return events
+  }
+  function swingCore(overrides: Partial<import('../contracts').GrainPatch> = {}) {
+    const core = new GranularCore({ sampleRate: 1_000, maxGrains: 8 })
+    core.setPatch({
+      ...DEFAULT_PATCH, mode: 'shatter', bpm: 120, shatterDivision: '1/16',
+      shatterSteps: shatterSteps(), ...overrides,
+    })
+    const source = makeSource(256)
+    core.setSource(source, source)
+    return core
+  }
+
+  it('swing=0 keeps the fixed 125-frame grid (regression)', () => {
+    const events = driveShatter(swingCore({ shatterSwing: 0 }), 400)
+    expect(events.map((e) => e.frame)).toEqual([0, 125, 250, 375])
+  })
+
+  it('delays odd steps by exactly delta = swing × stepFrames / 2 and returns evens to grid', () => {
+    // swing 0.4, stepFrames 125 → delta = 25. Onsets: 0, 150, 250, 400, 500.
+    const events = driveShatter(swingCore({ shatterSwing: 0.4 }), 520)
+    expect(events.map((e) => e.frame)).toEqual([0, 150, 250, 400, 500])
+    expect(events.map((e) => e.step)).toEqual([0, 1, 2, 3, 4])
+    // Step 0 never swung; odd onsets are +25 vs the 125-grid; evens back on grid.
+  })
+
+  it('subdivides the SWUNG interval with ratchets', () => {
+    // Step 0 ratchet 2, swing 0.4 → step-0 interval 150, split into 75 + 75;
+    // step 1 onset at 150.
+    const core = swingCore({ shatterSwing: 0.4, shatterSteps: shatterSteps({ ratchet: 1 }) })
+    const steps = shatterSteps({ ratchet: 1 })
+    steps[0] = { ...steps[0], ratchet: 2 }
+    core.setPatch({ ...DEFAULT_PATCH, mode: 'shatter', bpm: 120, shatterDivision: '1/16', shatterSwing: 0.4, shatterSteps: steps })
+    const events = driveShatter(core, 260)
+    expect(events.map((e) => e.frame)).toEqual([0, 75, 150, 275 - 25]) // 0,75 (step0 ratchets), 150 (step1), 250 (step2)
+    expect(events.map((e) => e.step)).toEqual([0, 0, 1, 2])
+  })
+
+  it('swing survives a tempo rescale (no machine-gun reset to step 0)', () => {
+    // Advance past step 0 at 120 BPM, then halve tempo mid-wait to 60 BPM
+    // (stepFrames 125 → 250, delta 25 → 50). Sequence must NOT restart at step 0,
+    // and the next odd onset must be swung by the NEW delta.
+    const core = swingCore({ shatterSwing: 0.4 })
+    driveShatter(core, 60) // fire step 0 at frame 0; next (step 1) queued for 150
+    core.setPatch({ ...DEFAULT_PATCH, mode: 'shatter', bpm: 60, shatterDivision: '1/16', shatterSwing: 0.4, shatterSteps: shatterSteps() })
+    const after = driveShatter(core, 900)
+    expect(after[0].step).toBe(1)            // continues forward, no reset to 0
+    // remaining wait (150-60=90) rescaled ×2 → 180; step-1 onset = 60+180 = 240
+    expect(after[0].frame).toBe(240)
+    // step 2 (even) returns to grid at the NEW step: 240 + (250-50) = 440
+    expect(after[1]).toEqual({ frame: 440, step: 2 })
+  })
+
+  it('never swings step 0 under a Link anchor', () => {
+    const core = swingCore({ shatterSwing: 0.6 })
+    driveShatter(core, 300)          // free-run a while
+    core.alignShatterAtFrame(600)    // shared downbeat
+    const after = driveShatter(core, 200) // frames 300..499 then anchor at 600
+    // Advance until the anchor frame to confirm step 0 lands exactly on 600.
+    const more = driveShatter(core, 200) // frames 500..699
+    const atAnchor = [...after, ...more].find((e) => e.frame === 600)
+    expect(atAnchor).toEqual({ frame: 600, step: 0 })
+  })
+})
