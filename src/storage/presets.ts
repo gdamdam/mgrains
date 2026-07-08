@@ -37,10 +37,7 @@ export function serializePreset(
   name: string,
   patch: GrainPatch,
   createdAt: number,
-  // TEMPORARY: `motion` stays alongside `motionLanes` only until App.tsx
-  // migrates its call sites in Task 5; it is folded into a single position
-  // lane when `motionLanes` is not supplied.
-  options?: { motionLanes?: MotionLane[]; motion?: MotionData; sourceLabel?: string },
+  options?: { motionLanes?: MotionLane[]; sourceLabel?: string },
 ): Preset {
   const preset: Preset = {
     name: coerceName(name),
@@ -56,11 +53,6 @@ export function serializePreset(
   // carries garbage.
   const motionLanes = parseMotionLanes(options?.motionLanes)
   if (motionLanes !== undefined) preset.motionLanes = motionLanes
-
-  if (preset.motionLanes === undefined) {
-    const legacy = orUndefined(motionToLanes(parseMotion(options?.motion)))
-    if (legacy !== undefined) preset.motionLanes = legacy
-  }
 
   const sourceLabel = parseSourceLabel(options?.sourceLabel)
   if (sourceLabel !== undefined) preset.sourceLabel = sourceLabel

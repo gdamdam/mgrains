@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { barsToMs, MotionRecorder, resolvePresetMotion } from './motion'
+import { barsToMs, MotionRecorder } from './motion'
 
 function recordThree(): MotionRecorder {
   const m = new MotionRecorder()
@@ -85,33 +85,5 @@ describe('MotionRecorder serialization', () => {
 describe('barsToMs', () => {
   it('converts one bar at 120 bpm to 2000ms', () => {
     expect(barsToMs(1, 120)).toBe(2000)
-  })
-})
-
-describe('resolvePresetMotion', () => {
-  it('swaps in a preset recording when it carries motion', () => {
-    const source = recordThree().serialize()
-    const result = resolvePresetMotion(source)
-
-    expect(result.hasMotion).toBe(true)
-    expect(result.loopMs).toBe(source.durationMs)
-    expect(result.recorder.value(100)).toBe(0.5)
-    expect(result.recorder.serialize()).toEqual(source)
-  })
-
-  it('clears the lane for a preset without motion', () => {
-    const result = resolvePresetMotion(undefined)
-
-    expect(result.hasMotion).toBe(false)
-    expect(result.loopMs).toBe(0)
-    expect(result.recorder.value(0)).toBeNull()
-    expect(result.recorder.serialize()).toEqual({ samples: [], durationMs: 0 })
-  })
-
-  it('treats an empty (zero-duration) recording as no motion', () => {
-    const result = resolvePresetMotion({ samples: [], durationMs: 0 })
-
-    expect(result.hasMotion).toBe(false)
-    expect(result.loopMs).toBe(0)
   })
 })

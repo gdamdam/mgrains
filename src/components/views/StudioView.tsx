@@ -72,6 +72,7 @@ interface StudioViewProps {
   canUndo: boolean
   motionState: 'idle' | 'recording' | 'playing'
   hasMotion: boolean
+  motionLaneCount: number
   liveInputPending: boolean
   onToggleView: () => void
   onChangeMode: (mode: GrainMode) => void

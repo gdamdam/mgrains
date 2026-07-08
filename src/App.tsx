@@ -10,12 +10,19 @@ import {
 } from './audio/contracts'
 import { createDemoSource } from './audio/demoSource'
 import { FACTORY_PRESETS } from './audio/factoryPresets'
-import { applyMacro } from './audio/macros'
+import { applyMacro, MACROS } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
 import { MidiInput } from './instrument/midi'
 import { controlForKey, hasCommandModifier, isEditableTarget, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
 import { VoiceAllocator } from './instrument/voiceAllocator'
-import { MotionRecorder, resolvePresetMotion, type MotionData } from './performance/motion'
+import {
+  GestureCapture,
+  laneValuesAt,
+  resolveMotionLanes,
+  serializeMotionLanes,
+  type MotionLane,
+  type MotionLanePlayback,
+} from './performance/motionLanes'
 import { PresetStore, serializePreset, type Preset } from './storage/presets'
 import {
   deserializeSession,
@@ -95,12 +102,16 @@ export default function App() {
   const [canUndo, setCanUndo] = useState(false)
   const [macroValues, setMacroValues] = useState<Record<string, number>>({})
   const [linkedMacros, setLinkedMacros] = useState<Record<string, boolean>>({})
-  const motionRef = useRef(new MotionRecorder())
+  const motionLanesRef = useRef<MotionLanePlayback[]>([])
+  const captureRef = useRef<GestureCapture | null>(null)
+  const captureLastTMsRef = useRef(0)
+  const motionValuesRef = useRef<Record<string, number>>({})
+  const setMacroRef = useRef<(id: string, value: number) => void>(() => {})
+  const [motionLaneCount, setMotionLaneCount] = useState(0)
   const motionRafRef = useRef<number | null>(null)
   const motionT0Ref = useRef(0)
   const motionLoopRef = useRef(0)
   const motionLastUpdateRef = useRef(0)
-  const positionRef = useRef(patch.position)
   const [motionState, setMotionState] = useState<'idle' | 'recording' | 'playing'>('idle')
   const [hasMotion, setHasMotion] = useState(false)
   const [keysActive, setKeysActive] = useState(false)
@@ -212,10 +223,22 @@ export default function App() {
     }
   }, [])
 
-  // Keep the latest position available to the rAF motion loop without re-subscribing.
+  // Keep the current values of all watchable targets (5 grain params + the
+  // active mode's macros) available to the rAF motion loops without
+  // re-subscribing.
   useEffect(() => {
-    positionRef.current = patch.position
-  }, [patch.position])
+    const values: Record<string, number> = {
+      position: patch.position,
+      spray: patch.spray,
+      grainSizeMs: patch.grainSizeMs,
+      densityHz: patch.densityHz,
+      pitchSpreadSemitones: patch.pitchSpreadSemitones,
+    }
+    for (const macro of MACROS) {
+      if (macro.mode === patch.mode) values[`macro:${macro.id}`] = macroValues[macro.id] ?? 0
+    }
+    motionValuesRef.current = values
+  }, [patch, macroValues])
 
   // Keep the latest mode available to the Link callback without re-subscribing.
   useEffect(() => {
@@ -239,8 +262,8 @@ export default function App() {
   useEffect(() => {
     if (pendingSession) return
     const handle = window.setTimeout(() => {
-      const motion = hasMotion ? motionRef.current.serialize() : undefined
-      writeLastSession(serializeSession(patch, viewMode, epochMs(), { motion, sourceLabel }))
+      const motionLanes = hasMotion ? serializeMotionLanes(motionLanesRef.current) : undefined
+      writeLastSession(serializeSession(patch, viewMode, epochMs(), { motionLanes, sourceLabel }))
     }, 500)
     return () => window.clearTimeout(handle)
   }, [patch, viewMode, sourceLabel, hasMotion, pendingSession])
@@ -444,6 +467,10 @@ export default function App() {
     }
   }, [linkedMacros, patch, updatePatch])
 
+  // setMacro's identity changes with `patch`; rAF motion playback must call the
+  // latest one without re-subscribing, so mirror it into a ref each render.
+  useEffect(() => { setMacroRef.current = setMacro }, [setMacro])
+
   const toggleMacroLink = useCallback((id: string) => {
     setLinkedMacros((previous) => ({ ...previous, [id]: previous[id] === false }))
   }, [])
@@ -454,8 +481,8 @@ export default function App() {
 
   const savePreset = () => {
     const name = presetName.trim() || 'Untitled'
-    const motion = hasMotion ? motionRef.current.serialize() : undefined
-    presetStoreRef.current.save(serializePreset(name, patch, epochMs(), { motion, sourceLabel }))
+    const motionLanes = hasMotion ? serializeMotionLanes(motionLanesRef.current) : undefined
+    presetStoreRef.current.save(serializePreset(name, patch, epochMs(), { motionLanes, sourceLabel }))
       .then(() => {
         setPresetName('')
         refreshPresets()
@@ -463,16 +490,17 @@ export default function App() {
       .catch(() => setError('Could not save preset — local storage is unavailable.'))
   }
 
-  // Reset the motion lane when loading any preset (user OR factory): stop active
-  // playback first, then swap in the preset's recording if it has one, otherwise
-  // clear the recording/duration/hasMotion/playback so stale automation can't
-  // immediately overwrite the just-loaded patch.
-  const applyPresetMotion = (motion?: MotionData) => {
+  // Reset the motion lanes when loading any preset (user OR factory): stop active
+  // playback first, then swap in the preset's lanes if it has any, otherwise
+  // clear them so no stale automation can immediately overwrite the just-loaded
+  // patch.
+  const applyPresetMotion = (lanes?: MotionLane[]) => {
     cancelMotionLoop()
-    const resolved = resolvePresetMotion(motion)
-    motionRef.current = resolved.recorder
+    const resolved = resolveMotionLanes(lanes)
+    motionLanesRef.current = resolved.lanes
     motionLoopRef.current = resolved.loopMs
     setHasMotion(resolved.hasMotion)
+    setMotionLaneCount(resolved.lanes.length)
     setMotionState('idle')
   }
 
@@ -483,9 +511,7 @@ export default function App() {
         // Ignore a stale load that resolved after a newer preset was requested.
         if (!preset || generation !== presetLoadGenerationRef.current) return
         applyPatch(preset.patch)
-        // TEMPORARY (removed in Task 5): read the position lane back out of
-        // motionLanes until App migrates off the single-lane motion API.
-        applyPresetMotion(preset.motionLanes?.find((lane) => lane.target === 'position')?.data)
+        applyPresetMotion(preset.motionLanes)
         if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
           setError(`Preset "${name}" was saved with source "${preset.sourceLabel}". Load that source to match its motion and position.`)
         }
@@ -497,7 +523,7 @@ export default function App() {
     const preset = FACTORY_PRESETS.find((entry) => entry.name === name)
     if (!preset) return
     applyPatch(sanitizePatch({ ...DEFAULT_PATCH, ...preset.patch }))
-    // Factory presets carry no motion, so this stops/clears any existing lane.
+    // Factory presets carry no motion, so this stops/clears any existing lanes.
     applyPresetMotion()
   }
 
@@ -510,9 +536,7 @@ export default function App() {
   // source differs, mirroring loadPreset.
   const applySession = (session: Session) => {
     applyPatch(session.patch)
-    // TEMPORARY (removed in Task 5): read the position lane back out of
-    // motionLanes until App migrates off the single-lane motion API.
-    applyPresetMotion(session.motionLanes?.find((lane) => lane.target === 'position')?.data)
+    applyPresetMotion(session.motionLanes)
     setViewMode(session.viewMode)
     writeViewMode(session.viewMode)
     if (session.sourceLabel && session.sourceLabel !== sourceLabel) {
@@ -526,8 +550,8 @@ export default function App() {
   }
 
   const saveSessionFile = () => {
-    const motion = hasMotion ? motionRef.current.serialize() : undefined
-    const session = serializeSession(patch, viewMode, epochMs(), { motion, sourceLabel })
+    const motionLanes = hasMotion ? serializeMotionLanes(motionLanesRef.current) : undefined
+    const session = serializeSession(patch, viewMode, epochMs(), { motionLanes, sourceLabel })
     const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -590,12 +614,15 @@ export default function App() {
 
   const recordMotion = () => {
     cancelMotionLoop()
-    motionRef.current.start()
+    captureRef.current = new GestureCapture(motionValuesRef.current)
+    captureLastTMsRef.current = 0
     motionT0Ref.current = -1
     setMotionState('recording')
     const frame = (now: number) => {
       if (motionT0Ref.current < 0) motionT0Ref.current = now
-      motionRef.current.record(now - motionT0Ref.current, positionRef.current)
+      const tMs = now - motionT0Ref.current
+      captureLastTMsRef.current = tMs
+      captureRef.current?.sample(tMs, motionValuesRef.current)
       motionRafRef.current = requestAnimationFrame(frame)
     }
     motionRafRef.current = requestAnimationFrame(frame)
@@ -603,9 +630,13 @@ export default function App() {
 
   const finishRecording = () => {
     cancelMotionLoop()
-    motionRef.current.stop()
-    motionLoopRef.current = motionRef.current.serialize().durationMs
-    setHasMotion(motionLoopRef.current > 0)
+    const lanes = captureRef.current?.finish(captureLastTMsRef.current) ?? []
+    captureRef.current = null
+    const resolved = resolveMotionLanes(lanes)
+    motionLanesRef.current = resolved.lanes
+    motionLoopRef.current = resolved.loopMs
+    setHasMotion(resolved.hasMotion)
+    setMotionLaneCount(resolved.lanes.length)
     setMotionState('idle')
   }
 
@@ -617,11 +648,21 @@ export default function App() {
     const frame = (now: number) => {
       if (motionT0Ref.current < 0) motionT0Ref.current = now
       const elapsed = now - motionT0Ref.current
-      // Throttle position writes to ~30 Hz to respect the worklet patch-rate contract.
+      // Throttle writes to ~30 Hz to respect the worklet patch-rate contract.
       if (elapsed - motionLastUpdateRef.current >= 33) {
         motionLastUpdateRef.current = elapsed
-        const value = motionRef.current.value(elapsed, motionLoopRef.current || undefined)
-        if (value !== null) updatePatch({ position: value })
+        const values = laneValuesAt(motionLanesRef.current, elapsed, motionLoopRef.current)
+        const changes: Partial<GrainPatch> = {}
+        for (const [target, value] of values) {
+          if (target.startsWith('macro:')) {
+            // Skip macro lanes that don't exist in the current mode: motionValuesRef
+            // only ever carries the active mode's macros.
+            if (target in motionValuesRef.current) setMacroRef.current(target.slice(6), value)
+          } else {
+            (changes as Record<string, number>)[target] = value
+          }
+        }
+        if (Object.keys(changes).length > 0) updatePatch(changes)
       }
       motionRafRef.current = requestAnimationFrame(frame)
     }
@@ -635,9 +676,10 @@ export default function App() {
 
   const clearMotion = () => {
     cancelMotionLoop()
-    motionRef.current.clear()
+    motionLanesRef.current = []
     motionLoopRef.current = 0
     setHasMotion(false)
+    setMotionLaneCount(0)
     setMotionState('idle')
   }
 
@@ -841,6 +883,7 @@ export default function App() {
           gateToNotes={gateToNotes}
           motionState={motionState}
           hasMotion={hasMotion}
+          motionLaneCount={motionLaneCount}
           canUndo={canUndo}
           onStartAudio={() => void startAudio()}
           onToggleGate={() => setGateToNotes((value) => !value)}
@@ -899,6 +942,7 @@ export default function App() {
         canUndo={canUndo}
         motionState={motionState}
         hasMotion={hasMotion}
+        motionLaneCount={motionLaneCount}
         liveInputPending={liveInputPending}
         onToggleView={toggleViewMode}
         onToggleGate={() => setGateToNotes((value) => !value)}

@@ -36,6 +36,7 @@ interface LiveViewProps {
   busEnabled: boolean
   motionState: 'idle' | 'recording' | 'playing'
   hasMotion: boolean
+  motionLaneCount: number
   canUndo: boolean
   onStartAudio: () => void
   onToggleView: () => void

@@ -9,7 +9,7 @@ export const baseProps = {
   sourceLabel: 'Tone field', sourceMode: 'sample' as const, sourceId: 'harmonic-pad', frozen: false, liveBufferSeconds: 0, error: null,
   activeGrains: 0, grainVisuals: { count: 0, positions: new Float32Array(0), intensities: new Float32Array(0) },
   macroValues: {}, linkedMacros: {}, keysActive: false, linkEnabled: false, busEnabled: false,
-  motionState: 'idle' as const, hasMotion: false, canUndo: false,
+  motionState: 'idle' as const, hasMotion: false, motionLaneCount: 0, canUndo: false,
   onStartAudio: noop,
   onToggleView: noop, onChangeMode: noop, onUpdatePatch: noop, onXYChange: noop, onSetMacro: noop,
   onToggleMacroLink: noop, onToggleKeys: noop, onToggleLink: noop, onToggleBus: noop, onSelectSource: noop, onWaveformPosition: noop,

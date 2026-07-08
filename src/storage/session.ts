@@ -1,5 +1,4 @@
 import { DEFAULT_PATCH, sanitizePatch, type GrainPatch } from '../audio/contracts'
-import type { MotionData } from '../performance/motion'
 import { motionToLanes, type MotionLane } from '../performance/motionLanes'
 import { isRecord, parseMotion, parseMotionLanes, parseSourceLabel } from './presets'
 
@@ -31,10 +30,7 @@ export function serializeSession(
   patch: GrainPatch,
   viewMode: SessionViewMode,
   savedAt: number,
-  // TEMPORARY: `motion` stays alongside `motionLanes` only until App.tsx
-  // migrates its call sites in Task 5; it is folded into a single position
-  // lane when `motionLanes` is not supplied.
-  options?: { motionLanes?: MotionLane[]; motion?: MotionData; sourceLabel?: string },
+  options?: { motionLanes?: MotionLane[]; sourceLabel?: string },
 ): Session {
   const session: Session = {
     schemaVersion: SESSION_SCHEMA_VERSION,
@@ -48,11 +44,6 @@ export function serializeSession(
   // carries garbage.
   const motionLanes = parseMotionLanes(options?.motionLanes)
   if (motionLanes !== undefined) session.motionLanes = motionLanes
-
-  if (session.motionLanes === undefined) {
-    const legacy = orUndefined(motionToLanes(parseMotion(options?.motion)))
-    if (legacy !== undefined) session.motionLanes = legacy
-  }
 
   const sourceLabel = parseSourceLabel(options?.sourceLabel)
   if (sourceLabel !== undefined) session.sourceLabel = sourceLabel

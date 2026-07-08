@@ -32,6 +32,7 @@ const studioProps = {
   canUndo: false,
   motionState: 'idle' as const,
   hasMotion: false,
+  motionLaneCount: 0,
   liveInputPending: false,
   onToggleView: noop,
   onChangeMode: noop,

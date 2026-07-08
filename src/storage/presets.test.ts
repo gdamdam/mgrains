@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_PATCH, PATCH_RANGES, sanitizePatch } from '../audio/contracts'
-import type { MotionData } from '../performance/motion'
 import {
   PRESET_SCHEMA_VERSION,
   deserializePreset,
@@ -113,27 +112,6 @@ describe('serializePreset / deserializePreset', () => {
     expect(PRESET_SCHEMA_VERSION).toBe(3)
   })
 
-  it('round-trips legacy motion (via options) into a position lane, and sourceLabel', () => {
-    const motion: MotionData = {
-      samples: [
-        { tMs: 0, value: 0.1 },
-        { tMs: 250, value: 0.6 },
-        { tMs: 500, value: 0.42 },
-      ],
-      durationMs: 500,
-    }
-    const preset = serializePreset('Moving', DEFAULT_PATCH, 1_700_000_000_000, {
-      motion,
-      sourceLabel: 'kick.wav',
-    })
-    const roundTripped = deserializePreset(JSON.parse(JSON.stringify(preset)))
-
-    expect(preset.schemaVersion).toBe(3)
-    expect(roundTripped).toEqual(preset)
-    expect(roundTripped.motionLanes).toEqual([{ target: 'position', data: motion }])
-    expect(roundTripped.sourceLabel).toBe('kick.wav')
-  })
-
   it('omits motionLanes and sourceLabel when no options are supplied', () => {
     const preset = serializePreset('Plain', DEFAULT_PATCH, 42)
 
@@ -143,6 +121,22 @@ describe('serializePreset / deserializePreset', () => {
     const roundTripped = deserializePreset(JSON.parse(JSON.stringify(preset)))
     expect(roundTripped.motionLanes).toBeUndefined()
     expect(roundTripped.sourceLabel).toBeUndefined()
+  })
+
+  it('round-trips motionLanes and sourceLabel supplied via options', () => {
+    const lanes = [
+      { target: 'position' as const, data: { samples: [{ tMs: 0, value: 0.1 }, { tMs: 500, value: 0.42 }], durationMs: 500 } },
+    ]
+    const preset = serializePreset('Moving', DEFAULT_PATCH, 1_700_000_000_000, {
+      motionLanes: lanes,
+      sourceLabel: 'kick.wav',
+    })
+    const roundTripped = deserializePreset(JSON.parse(JSON.stringify(preset)))
+
+    expect(preset.schemaVersion).toBe(3)
+    expect(roundTripped).toEqual(preset)
+    expect(roundTripped.motionLanes).toEqual(lanes)
+    expect(roundTripped.sourceLabel).toBe('kick.wav')
   })
 
   it('migrates a v1-shaped preset (no motion/sourceLabel) with those fields absent', () => {
