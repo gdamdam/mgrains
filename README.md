@@ -4,9 +4,9 @@
 
 **A granular instrument — bloom any sound into clouds, or shatter it into rhythm.**
 
-[![version](https://img.shields.io/badge/version-1.7.0-6c8f3a)](./package.json)
+[![version](https://img.shields.io/badge/version-1.8.0-6c8f3a)](./package.json)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
-[![tests](https://img.shields.io/badge/tests-458%20passing-2ea043)](#verification)
+[![tests](https://img.shields.io/badge/tests-481%20passing-2ea043)](#verification)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](./tsconfig.json)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)](https://vite.dev)
@@ -24,9 +24,10 @@
 ## Highlights
 
 - **Two modes, one muscle memory** — Bloom and Shatter share the layout but run distinct schedulers, constraints, macros, and graphics, switching through a click-free 180 ms fade-through-silence.
-- **Direct grain controls** — Grain Size, Density/Rate, Position, and Spray always on the main surface; region, timing jitter, scan speed, pitch, pitch spread, reverse probability, stereo spread, window, and output in an Advanced panel — all with units.
+- **Direct grain controls** — Grain Size, Density/Rate, Position, and Spray always on the main surface; region, timing jitter, scan speed, pitch, pitch spread, reverse probability, stereo spread, window, and output, grain filter (center + spread) in an Advanced panel — all with units.
 - **Four macros per mode** — Bloom: Cloud · Drift · Warmth · Space. Shatter: Chop · Scatter · Crush · Repeat. Each sweeps a curated parameter group; **Link/Unlink** keeps hand edits authoritative.
 - **11-effect rack** — Drive, Crush, Damp, Tape, Ring, Formant, Comb, Wow, Sub, Space (reverb), Repeat (tempo delay) — each a tile with an amount ring, opening a modal with its parameters and an SVG response curve. A stereo-linked master **limiter** is the final stage.
+- **Per-grain filter** — each grain draws its own resonant lowpass cutoff at spawn from a center ± spread (octaves) band — the classic "every grain its own color" move; the dial's top is **Off** for an exact, bit-identical bypass.
 - **Sources** — ten deterministic demo sounds (random pick), audio-file import, and a 20-second live rolling buffer with **Freeze** and **Clear**.
 - **Performance** — large XY surface, draggable waveform position, a multi-lane **motion recorder** — hit record and every dial or macro you move becomes a looping lane (up to 4 per take), and seeded **Mutate** with bounded **Undo**.
 - **Play it** — polyphonic chromatic playing from the computer keyboard (Ableton layout) and **Web MIDI** (note on/off + velocity), up to 8 voices with oldest-note stealing.
@@ -93,7 +94,7 @@ App.tsx ── patch/notes ──▶ AudioEngine ── postMessage ──▶ gr
 ## Verification
 
 ```bash
-npm run check   # lint + 458 tests + production build
+npm run check   # lint + 481 tests + production build
 ```
 
 Tests are deterministic and live next to the code (DSP core, effects, contracts, schedulers, RNG, windows, presets, instrument, transport). Note: Vitest runs in a Node environment, so React components and live audio are covered by manual QA below, not unit tests.
