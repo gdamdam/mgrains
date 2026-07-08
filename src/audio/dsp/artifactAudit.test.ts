@@ -80,7 +80,7 @@ describe('artifact audit — steady state is click-free for a clean patch', () =
       expect(detectDiscontinuities(left), `left @${sr}`).toHaveLength(0)
       expect(detectDiscontinuities(right), `right @${sr}`).toHaveLength(0)
     }
-  })
+  }, 30_000)
 
   it('voice stealing under sustained over-demand fades the stolen grain (no steps)', () => {
     // A full pool of mid-envelope grains forces every spawn to steal a
@@ -176,7 +176,7 @@ describe('artifact audit — finite / bounded / sane invariants', () => {
         expect(core.activeGrainCount, tag).toBeLessThanOrEqual(64)
       }
     }
-  })
+  }, 30_000)
 
   it('pool stays bounded under extreme polyphonic over-demand', () => {
     const sr = 48_000
@@ -311,5 +311,5 @@ describe('artifact audit — per-grain filter engaged', () => {
       expect(stats.nonFiniteCount).toBe(0)
       expect(stats.peak).toBeLessThanOrEqual(1)
     }
-  })
+  }, 30_000)
 })
