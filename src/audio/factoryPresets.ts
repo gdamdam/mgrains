@@ -36,6 +36,8 @@ function lane(
     pitchOffsetSemitones: 0,
     reverse: false,
     ratchet: 1,
+    positionOffset: 0,
+    sizeScale: 1,
     ...overrides[index],
   }))
 }

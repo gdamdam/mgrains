@@ -81,6 +81,12 @@ export interface ShatterStep {
   pitchOffsetSemitones: number
   reverse: boolean
   ratchet: 1 | 2 | 3 | 4
+  // v1.7.0 slice fields — RELATIVE to the live dials:
+  // positionOffset offsets the live Position dial (−0.5..+0.5), applied after
+  // spray and before region wrap. sizeScale multiplies the live Size dial
+  // (0.25..4), applied before durationFrames so gain normalization stays honest.
+  positionOffset: number
+  sizeScale: number
 }
 
 export interface GrainPatch {
@@ -128,6 +134,7 @@ export interface GrainPatch {
   seed: number
   bpm: number
   shatterDivision: ShatterDivision
+  shatterSwing: number
   shatterSteps: ShatterStep[]
   lfos: LfoConfig[]
 }
@@ -150,6 +157,8 @@ export const DEFAULT_SHATTER_STEPS: ReadonlyArray<Readonly<ShatterStep>> = Objec
     pitchOffsetSemitones: index === 6 ? 12 : index === 11 ? -12 : 0,
     reverse: index === 3 || index === 13,
     ratchet: index === 9 ? 2 : 1,
+    positionOffset: 0,
+    sizeScale: 1,
   })),
 )
 
@@ -198,6 +207,7 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   seed: 0x6d677261,
   bpm: 120,
   shatterDivision: '1/16',
+  shatterSwing: 0,
   shatterSteps: DEFAULT_SHATTER_STEPS.map((step) => ({ ...step })),
   lfos: [{ ...DEFAULT_LFO }, { ...DEFAULT_LFO }],
 })
@@ -238,6 +248,7 @@ export const PATCH_RANGES = Object.freeze({
   subAmount: [0, 1] as const,
   subTune: [30, 120] as const,
   bpm: [30, 300] as const,
+  shatterSwing: [0, 0.6] as const,
 })
 
 // LFO field ranges are kept out of PATCH_RANGES because they are per-LFO, not
@@ -370,6 +381,9 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
     shatterDivision: SHATTER_DIVISIONS.includes(candidate.shatterDivision)
       ? candidate.shatterDivision
       : DEFAULT_PATCH.shatterDivision,
+    shatterSwing: Number.isFinite(candidate.shatterSwing)
+      ? clamp(candidate.shatterSwing, ...PATCH_RANGES.shatterSwing)
+      : DEFAULT_PATCH.shatterSwing,
     shatterSteps: sanitizeShatterSteps(candidate.shatterSteps),
     lfos: sanitizeLfos(candidate.lfos),
   }
@@ -418,6 +432,12 @@ function sanitizeShatterSteps(candidate: ShatterStep[]): ShatterStep[] {
       pitchOffsetSemitones: Math.round(clamp(step.pitchOffsetSemitones, -24, 24)),
       reverse: step.reverse === true,
       ratchet,
+      positionOffset: Number.isFinite(step.positionOffset)
+        ? clamp(step.positionOffset, -0.5, 0.5)
+        : 0,
+      sizeScale: Number.isFinite(step.sizeScale)
+        ? clamp(step.sizeScale, 0.25, 4)
+        : 1,
     }
   })
 }

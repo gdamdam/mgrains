@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ADVANCED_PARAM_KEYS,
   DEFAULT_PATCH,
+  PATCH_RANGES,
   resetAdvancedToDefault,
   sanitizePatch,
 } from './contracts'
@@ -67,6 +68,8 @@ describe('sanitizePatch', () => {
         pitchOffsetSemitones: -99,
         reverse: true,
         ratchet: 9 as 1,
+        positionOffset: 0,
+        sizeScale: 1,
       }],
     })
 
@@ -78,7 +81,47 @@ describe('sanitizePatch', () => {
       pitchOffsetSemitones: -24,
       reverse: true,
       ratchet: 4,
+      positionOffset: 0,
+      sizeScale: 1,
     })
+  })
+})
+
+describe('shatter lanes + swing schema (v1.7.0)', () => {
+  it('fills missing per-step positionOffset/sizeScale with neutral defaults', () => {
+    // A pre-1.7 step object has neither new field.
+    const patch = sanitizePatch({
+      ...DEFAULT_PATCH,
+      shatterSteps: [{ enabled: true, probability: 1, pitchOffsetSemitones: 0, reverse: false, ratchet: 1 } as never],
+    })
+    expect(patch.shatterSteps[0].positionOffset).toBe(0)
+    expect(patch.shatterSteps[0].sizeScale).toBe(1)
+  })
+
+  it('clamps per-step positionOffset to [-0.5, 0.5] and sizeScale to [0.25, 4]', () => {
+    const patch = sanitizePatch({
+      ...DEFAULT_PATCH,
+      shatterSteps: [{
+        enabled: true, probability: 1, pitchOffsetSemitones: 0, reverse: false, ratchet: 1,
+        positionOffset: 9, sizeScale: 99,
+      } as never, {
+        enabled: true, probability: 1, pitchOffsetSemitones: 0, reverse: false, ratchet: 1,
+        positionOffset: -9, sizeScale: 0.001,
+      } as never],
+    })
+    expect(patch.shatterSteps[0].positionOffset).toBe(0.5)
+    expect(patch.shatterSteps[0].sizeScale).toBe(4)
+    expect(patch.shatterSteps[1].positionOffset).toBe(-0.5)
+    expect(patch.shatterSteps[1].sizeScale).toBe(0.25)
+  })
+
+  it('defaults shatterSwing to 0 and clamps it to [0, 0.6]', () => {
+    expect(DEFAULT_PATCH.shatterSwing).toBe(0)
+    expect(sanitizePatch({ ...DEFAULT_PATCH, shatterSwing: 5 }).shatterSwing).toBe(0.6)
+    expect(sanitizePatch({ ...DEFAULT_PATCH, shatterSwing: -1 }).shatterSwing).toBe(0)
+    // Missing (old preset) → neutral 0.
+    expect(sanitizePatch({ ...DEFAULT_PATCH, shatterSwing: undefined as never }).shatterSwing).toBe(0)
+    expect(PATCH_RANGES.shatterSwing).toEqual([0, 0.6])
   })
 })
 
