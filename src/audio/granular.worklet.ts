@@ -34,6 +34,8 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
   private framesUntilTelemetry = 0
   private readonly visualPositions = new Float32Array(24)
   private readonly visualIntensities = new Float32Array(24)
+  // Right-channel scratch for mono outputs (128 = render quantum).
+  private monoScratch = new Float32Array(128)
 
   constructor() {
     super()
@@ -111,8 +113,21 @@ class MgrainsGranularProcessor extends AudioWorkletProcessor {
     const left = output?.[0]
     if (!left) return true
 
-    const right = output[1] ?? left
-    const result = this.core.process(left, right)
+    const right = output[1]
+    let result
+    if (right) {
+      result = this.core.process(left, right)
+    } else {
+      // Mono output: render the right channel into a scratch and average the
+      // two — passing `left` twice would make the right write overwrite the
+      // left signal entirely (the left channel would be dropped).
+      if (this.monoScratch.length < left.length) this.monoScratch = new Float32Array(left.length)
+      const scratch = this.monoScratch.subarray(0, left.length)
+      result = this.core.process(left, scratch)
+      for (let index = 0; index < left.length; index += 1) {
+        left[index] = 0.5 * (left[index] + scratch[index])
+      }
+    }
     this.framesUntilTelemetry -= left.length
 
     if (this.framesUntilTelemetry <= 0) {

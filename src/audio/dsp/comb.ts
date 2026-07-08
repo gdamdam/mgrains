@@ -40,6 +40,12 @@ const DAMP_CUTOFF = 0.3
 // the loop and burn CPU. Matches the DENORM idiom used in reverb.ts.
 const DENORM = 1e-25
 
+// Retuning while the line rings would jump the read tap to a different point
+// in the ring buffer — an audible step. Crossfade old→new tap over 5 ms
+// instead (same idiom as tempoDelay.ts).
+const RETUNE_XFADE_SECONDS = 0.005
+const HALF_PI = Math.PI / 2
+
 /**
  * One tuned feedback comb channel: a delay line with a one-pole lowpass in the
  * feedback path. `setDelay` retunes the integer delay length; `setFeedback`
@@ -49,16 +55,28 @@ class CombChannel {
   private readonly delay: DelayLine
   private readonly damp = new OnePole()
   private delaySamples: number
+  private previousDelaySamples: number
+  private readonly fadeLength: number
+  private fadeRemaining = 0
   private feedback = 0
+  // True once the line carries signal. A retune of a silent line snaps
+  // instead of fading — fading there would ghost-echo the incoming signal
+  // at the previous period for 5 ms.
+  private lineLive = false
 
-  constructor(maxDelaySamples: number) {
+  constructor(maxDelaySamples: number, fadeLength: number) {
     this.delay = new DelayLine(maxDelaySamples)
     this.delaySamples = maxDelaySamples
+    this.previousDelaySamples = maxDelaySamples
+    this.fadeLength = Math.max(1, fadeLength)
     this.damp.setCutoff(DAMP_CUTOFF, 'lowpass')
   }
 
   setDelay(samples: number): void {
+    if (samples === this.delaySamples) return
+    this.previousDelaySamples = this.delaySamples
     this.delaySamples = samples
+    this.fadeRemaining = this.lineLive ? this.fadeLength : 0
   }
 
   setFeedback(value: number): void {
@@ -67,9 +85,17 @@ class CombChannel {
 
   process(input: number): number {
     // Read the sample one period ago, damp it, scale by feedback, sum back in.
-    const delayed = this.delay.read(this.delaySamples)
+    let delayed = this.delay.read(this.delaySamples)
+    if (this.fadeRemaining > 0) {
+      // Equal-power crossfade from the old tap so retunes never step.
+      const t = this.fadeRemaining / this.fadeLength
+      delayed = this.delay.read(this.previousDelaySamples) * Math.sin(t * HALF_PI)
+        + delayed * Math.cos(t * HALF_PI)
+      this.fadeRemaining -= 1
+    }
     const damped = this.damp.process(delayed)
     const output = input + damped * this.feedback + DENORM
+    if (this.lineLive === false && Math.abs(output) > 1e-12) this.lineLive = true
     this.delay.write(output)
     return output
   }
@@ -77,6 +103,9 @@ class CombChannel {
   reset(): void {
     this.delay.reset()
     this.damp.reset()
+    this.fadeRemaining = 0
+    this.previousDelaySamples = this.delaySamples
+    this.lineLive = false
   }
 }
 
@@ -92,8 +121,9 @@ export class Comb {
     // The longest possible delay (at MIN_FREQ) sizes the ring buffer once, so
     // retuning never reallocates. +1 guards the read tap.
     const maxDelay = Math.ceil(this.sampleRate / MIN_FREQ) + 1
-    this.left = new CombChannel(maxDelay)
-    this.right = new CombChannel(maxDelay)
+    const fadeLength = Math.round(this.sampleRate * RETUNE_XFADE_SECONDS)
+    this.left = new CombChannel(maxDelay, fadeLength)
+    this.right = new CombChannel(maxDelay, fadeLength)
     // Sensible defaults until setParams is called.
     this.setParams({ frequency: 220, resonance: 0.5 })
   }

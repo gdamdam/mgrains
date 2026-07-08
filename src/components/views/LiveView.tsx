@@ -26,6 +26,7 @@ interface LiveViewProps {
   sourceId: string
   frozen: boolean
   liveBufferSeconds: number
+  error: string | null
   activeGrains: number
   grainVisuals: GrainVisualState
   macroValues: Record<string, number>
@@ -104,6 +105,7 @@ export function LiveView(props: LiveViewProps) {
         </div>
       )}
       <p className="live-hint">Shape FX, sequencer &amp; advanced in Studio ▸</p>
+      {props.error && <p className="error-message" role="alert">{props.error}</p>}
 
       <Waveform
         peaks={props.peaks} mode={patch.mode} position={patch.position}

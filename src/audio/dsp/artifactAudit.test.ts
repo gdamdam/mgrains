@@ -81,6 +81,17 @@ describe('artifact audit — steady state is click-free for a clean patch', () =
       expect(detectDiscontinuities(right), `right @${sr}`).toHaveLength(0)
     }
   })
+
+  it('voice stealing under sustained over-demand fades the stolen grain (no steps)', () => {
+    // A full pool of mid-envelope grains forces every spawn to steal a
+    // non-silent grain. beginStealFade() ramps the stolen grain out over
+    // ~3 ms instead of hard-cutting it, so the render stays step-free.
+    const SR = 48_000
+    const core = makeCore(SR, cleanBloom(SR, { densityHz: 40, grainSizeMs: 500 }), sineSource(SR, 220, SR))
+    core.setActiveNotes([0, 2, 4, 5, 7, 9, 11, 12].map((offset) => ({ offset, velocity: 1 })))
+    const { left } = renderSteady(core, SR)
+    expect(detectDiscontinuities(left)).toHaveLength(0)
+  })
 })
 
 describe('artifact audit — transitions that must be click-free', () => {
@@ -200,20 +211,6 @@ describe('artifact audit — KNOWN unfixed artifacts (characterized)', () => {
     const wrapDelta = analyzeSignal(renderSteady(wrap, 96_000).left).maxAdjacentDelta
     const noWrapDelta = analyzeSignal(renderSteady(noWrap, 96_000).left).maxAdjacentDelta
     expect(wrapDelta).toBeGreaterThan(4 * noWrapDelta)
-  })
-
-  it('voice stealing: a full pool of mid-life grains steals a non-silent grain (steps)', () => {
-    // ROOT CAUSE: findGrainSlot() steals the highest-phase (oldest) grain, which
-    // is near-silent ONLY if some grain is near its end. Under sustained
-    // over-demand with long grains the 64-slot pool fills with mid-envelope grains
-    // (none near death), so the stolen grain is at high amplitude and its abrupt
-    // replacement steps. No region wrap here (grain 500 ms < full-source region),
-    // so this isolates the steal. FIX (deferred): a short release ramp on a grain
-    // before its slot is reused. Severity is low (extreme polyphony only).
-    const core = makeCore(SR, cleanBloom(SR, { densityHz: 40, grainSizeMs: 500 }), sineSource(SR, 220, SR))
-    core.setActiveNotes([0, 2, 4, 5, 7, 9, 11, 12].map((offset) => ({ offset, velocity: 1 })))
-    const { left } = renderSteady(core, SR)
-    expect(detectDiscontinuities(left).length).toBeGreaterThan(0)
   })
 
   it('source reset: clearSource() cuts active grains/tails instantly (discontinuity)', () => {

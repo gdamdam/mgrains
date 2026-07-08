@@ -79,3 +79,25 @@ describe('StudioView', () => {
     expect(html).toContain('Live')            // ◂ Live toggle
   })
 })
+
+describe('StudioView tempo lock', () => {
+  it('disables the Tempo control and says so while Link drives the tempo', () => {
+    const html = renderToStaticMarkup(<StudioView
+      {...studioProps}
+      patch={{ ...DEFAULT_PATCH, mode: 'shatter' }}
+      linkEnabled
+      linkState={{ ...initialLinkState(), connected: true, bpm: 120 }}
+    />)
+    expect(html).toContain('parameter-control--locked')
+    expect(html).toContain('Tempo set by Link')
+  })
+
+  it('keeps the Tempo control editable when Link is not connected', () => {
+    const html = renderToStaticMarkup(<StudioView
+      {...studioProps}
+      patch={{ ...DEFAULT_PATCH, mode: 'shatter' }}
+    />)
+    expect(html).not.toContain('parameter-control--locked')
+    expect(html).not.toContain('Tempo set by Link')
+  })
+})

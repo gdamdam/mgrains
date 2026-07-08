@@ -69,12 +69,15 @@ export function hasCommandModifier(
  * division would trigger notes and be swallowed by preventDefault. Duck-typed on
  * `tagName`/`isContentEditable` so it stays unit-testable without a live DOM.
  */
+/** Input types that don't accept typed text — playing keys must stay live when one is focused (dials focus their hidden range input on touch). */
+const NON_TEXT_INPUT_TYPES = new Set(['range', 'checkbox', 'radio', 'button', 'submit', 'reset', 'color', 'file'])
+
 export function isEditableTarget(target: EventTarget | null): boolean {
-  const element = target as (HTMLElement | null)
+  const element = target as (HTMLInputElement | null)
   const tagName = element?.tagName
   if (typeof tagName !== 'string') return false
-  return tagName === 'INPUT'
-    || tagName === 'TEXTAREA'
+  if (tagName === 'INPUT') return !NON_TEXT_INPUT_TYPES.has(element?.type ?? '')
+  return tagName === 'TEXTAREA'
     || tagName === 'SELECT'
     || element?.isContentEditable === true
 }

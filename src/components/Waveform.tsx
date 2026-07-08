@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { GrainMode } from '../audio/contracts'
+import { pointerToRegionPosition } from './waveformPosition'
 
 interface WaveformProps {
   peaks: Float32Array | null
@@ -51,8 +52,7 @@ export function Waveform({
   const setPositionFromPointer = (clientX: number, element: SVGSVGElement) => {
     const bounds = element.getBoundingClientRect()
     const normalized = (clientX - bounds.left) / bounds.width
-    const regionPosition = regionStart + Math.min(1, Math.max(0, normalized)) * (regionEnd - regionStart)
-    onPositionChange((regionPosition - regionStart) / (regionEnd - regionStart))
+    onPositionChange(pointerToRegionPosition(normalized, regionStart, regionEnd))
   }
 
   return (

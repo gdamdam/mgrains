@@ -250,6 +250,67 @@ export default function App() {
     if (motionRafRef.current !== null) cancelAnimationFrame(motionRafRef.current)
   }, [])
 
+  // Note-safety net: always on — any input path (QWERTY or MIDI) can hold
+  // notes, so the blur/hidden release-all must outlive the Keys toggle.
+  useEffect(() => {
+    const alloc = voiceAllocatorRef.current
+    // Release every held QWERTY/MIDI voice and tell the engine to play nothing.
+    // Losing the window (blur) or tab visibility drops keyup events, which would
+    // otherwise leave notes stuck on.
+    const releaseAllVoices = () => {
+      alloc.reset()
+      heldNotesRef.current.clear()
+      engineRef.current?.setNotes([])
+    }
+    const onBlur = () => releaseAllVoices()
+    const onVisibilityChange = () => {
+      if (document.hidden) releaseAllVoices()
+    }
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      releaseAllVoices()
+    }
+  }, [])
+
+  // MIDI input: independent of the Keys toggle, so a plugged controller just
+  // works — but enabled only once audio runs, because requestMIDIAccess() can
+  // prompt for permission and must stay tied to the start-audio gesture, never
+  // page load (README privacy promise).
+  useEffect(() => {
+    if (engineState !== 'running') return
+    const alloc = voiceAllocatorRef.current
+    const pushNotes = () => engineRef.current?.setNotes(
+      alloc.activeVoices().map((voice) => ({ offset: voice.note, velocity: voice.velocity })),
+    )
+    // MIDI plays the same allocator voices (8-voice steal); middle C (60) = offset 0,
+    // and note velocity scales each voice's level.
+    const midi = new MidiInput((event) => {
+      // Owner per device + channel so the same pitch from different controllers,
+      // channels, or the computer keyboard stays independent and releases correctly.
+      if (event.type === 'noteon') {
+        alloc.noteOn(event.note - 60, event.velocity / 127, `midi:${event.device}:${event.channel}`)
+        pushNotes()
+      } else if (event.type === 'noteoff') {
+        if (alloc.noteOff(event.note - 60, `midi:${event.device}:${event.channel}`) !== null) pushNotes()
+      } else if (event.type === 'pitchbend') {
+        // Normalized -1..1 → semitones scaled by the patch's bend range.
+        engineRef.current?.setPitchBend(event.value * pitchBendRangeRef.current)
+      } else if (event.type === 'disconnect') {
+        // Unplugged device: release every voice it still holds so notes don't stick.
+        if (alloc.releaseOwnerPrefix(`midi:${event.device}:`)) pushNotes()
+      }
+    })
+    void midi.enable().catch(() => { /* Web MIDI unavailable or permission denied */ })
+    return () => {
+      midi.disable()
+      // Release only MIDI-held voices — QWERTY voices belong to their own effect.
+      if (alloc.releaseOwnerPrefix('midi:')) pushNotes()
+    }
+  }, [engineState])
+
   // QWERTY instrument: while active, the computer keyboard plays the source
   // chromatically and polyphonically. Held note keys accumulate as pitch
   // offsets and stream to the engine as voices; keyup releases them. Octave
@@ -310,50 +371,15 @@ export default function App() {
       alloc.noteOff(note, 'kbd')
       pushNotes()
     }
-    // MIDI plays the same allocator voices (8-voice steal); middle C (60) = offset 0,
-    // and note velocity scales each voice's level.
-    const midi = new MidiInput((event) => {
-      // Owner per device + channel so the same pitch from different controllers,
-      // channels, or the computer keyboard stays independent and releases correctly.
-      if (event.type === 'noteon') {
-        alloc.noteOn(event.note - 60, event.velocity / 127, `midi:${event.device}:${event.channel}`)
-        pushNotes()
-      } else if (event.type === 'noteoff') {
-        if (alloc.noteOff(event.note - 60, `midi:${event.device}:${event.channel}`) !== null) pushNotes()
-      } else if (event.type === 'pitchbend') {
-        // Normalized -1..1 → semitones scaled by the patch's bend range.
-        engineRef.current?.setPitchBend(event.value * pitchBendRangeRef.current)
-      } else if (event.type === 'disconnect') {
-        // Unplugged device: release every voice it still holds so notes don't stick.
-        if (alloc.releaseOwnerPrefix(`midi:${event.device}:`)) pushNotes()
-      }
-    })
-    // Release every held QWERTY/MIDI voice and tell the engine to play nothing.
-    // Shared by the blur/hidden handlers and the effect teardown so the release
-    // path is defined once.
-    const releaseAllVoices = () => {
-      alloc.reset()
-      codeToNote.clear()
-      engineRef.current?.setNotes([])
-    }
-    // Losing the window (blur) or tab visibility drops keyup events, which would
-    // otherwise leave notes stuck on. Release everything when that happens.
-    const onBlur = () => releaseAllVoices()
-    const onVisibilityChange = () => {
-      if (document.hidden) releaseAllVoices()
-    }
-    void midi.enable().catch(() => { /* Web MIDI unavailable or permission denied */ })
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
-    window.addEventListener('blur', onBlur)
-    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
-      window.removeEventListener('blur', onBlur)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
-      midi.disable()
-      releaseAllVoices()
+      // Toggling Keys off releases only keyboard-held voices — notes held on a
+      // MIDI controller keep sounding (MIDI lives in its own effect above).
+      if (alloc.releaseOwnerPrefix('kbd')) pushNotes()
+      codeToNote.clear()
     }
   }, [keysActive])
 
@@ -800,6 +826,7 @@ export default function App() {
           sourceId={sourceId}
           frozen={frozen}
           liveBufferSeconds={liveBufferSeconds}
+          error={error}
           activeGrains={activeGrains}
           grainVisuals={grainVisuals}
           macroValues={macroValues}

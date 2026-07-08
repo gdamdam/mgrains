@@ -96,4 +96,15 @@ describe('isEditableTarget', () => {
     expect(isEditableTarget({ tagName: 'DIV', isContentEditable: false } as unknown as EventTarget)).toBe(false)
     expect(isEditableTarget(null)).toBe(false)
   })
+
+  it('ignores non-text input types so focusing a dial does not mute the keys', () => {
+    expect(isEditableTarget({ tagName: 'INPUT', type: 'range' } as unknown as EventTarget)).toBe(false)
+    expect(isEditableTarget({ tagName: 'INPUT', type: 'checkbox' } as unknown as EventTarget)).toBe(false)
+    expect(isEditableTarget({ tagName: 'INPUT', type: 'radio' } as unknown as EventTarget)).toBe(false)
+  })
+
+  it('still matches text-entry input types', () => {
+    expect(isEditableTarget({ tagName: 'INPUT', type: 'text' } as unknown as EventTarget)).toBe(true)
+    expect(isEditableTarget({ tagName: 'INPUT', type: 'number' } as unknown as EventTarget)).toBe(true)
+  })
 })

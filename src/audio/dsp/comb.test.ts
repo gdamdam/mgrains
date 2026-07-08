@@ -159,3 +159,33 @@ describe('Comb', () => {
     expect(Number.isFinite(out[1])).toBe(true)
   })
 })
+
+describe('Comb retune', () => {
+  it('crossfades the read tap on retune instead of stepping', () => {
+    const comb = new Comb(48_000)
+    comb.setParams({ frequency: 220, resonance: 0.85 })
+    const out = new Float64Array(2)
+    const input = (index: number) => Math.sin(2 * Math.PI * 110 * index / 48_000) * 0.5
+    const outputs = new Float64Array(9_600)
+    for (let index = 0; index < outputs.length; index += 1) {
+      if (index === 4_800) comb.setParams({ frequency: 331, resonance: 0.85 })
+      comb.processInto(input(index), input(index), out)
+      outputs[index] = out[0]
+    }
+
+    const maxDelta = (from: number, to: number) => {
+      let max = 0
+      for (let index = from + 1; index < to; index += 1) {
+        max = Math.max(max, Math.abs(outputs[index] - outputs[index - 1]))
+      }
+      return max
+    }
+
+    // While ringing, an instantaneous read-tap jump (218 → 145 samples) steps
+    // the output by O(signal); a 5 ms crossfade keeps the retune window's
+    // sample-to-sample movement in the same league as steady state.
+    const steady = maxDelta(2_000, 4_800)
+    const retune = maxDelta(4_800, 5_600)
+    expect(retune).toBeLessThan(steady * 2)
+  })
+})

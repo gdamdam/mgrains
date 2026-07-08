@@ -39,6 +39,10 @@ export interface ProcessResult {
 
 const DEFAULT_MAX_GRAINS = 64
 const MODE_TRANSITION_HALF_SECONDS = 0.09
+// Stolen grains ramp to silence over this window instead of hard-cutting
+// (an instant cut at mid-envelope amplitude is an audible click).
+const STEAL_FADE_SECONDS = 0.003
+const STEAL_TAIL_COUNT = 16
 const OUTPUT_SMOOTHING_SECONDS = 0.02
 // Below this smoothed amount an effect is bypassed entirely, so a patch with the
 // FX at zero renders a bit-identical dry signal.
@@ -182,6 +186,22 @@ export class GranularCore {
   private readonly regionStartFrame: Float64Array
   private readonly regionLengthFrames: Float64Array
 
+  // Steal-fade tails: a stolen grain's state is copied here and rendered as a
+  // short linear fade-out while its old slot hosts the new grain (zero-alloc).
+  private readonly tailPosition: Float64Array
+  private readonly tailOffset: Float64Array
+  private readonly tailStep: Float64Array
+  private readonly tailRegionStart: Float64Array
+  private readonly tailRegionLength: Float64Array
+  private readonly tailGainLeft: Float32Array
+  private readonly tailGainRight: Float32Array
+  private readonly tailRemaining: Float64Array
+  private readonly stealFadeFrames: number
+
+  // Frames between spawn events under the CURRENT scheduler (bloom density or
+  // shatter step/ratchet) — the honest overlap basis for gain normalization.
+  private spawnIntervalFrames = 1
+
   constructor({ sampleRate, maxGrains = DEFAULT_MAX_GRAINS }: GranularCoreOptions) {
     if (!Number.isFinite(sampleRate) || sampleRate <= 0) {
       throw new RangeError('sampleRate must be a finite positive number')
@@ -208,6 +228,16 @@ export class GranularCore {
     this.windowCode = new Uint8Array(this.maxGrains)
     this.regionStartFrame = new Float64Array(this.maxGrains)
     this.regionLengthFrames = new Float64Array(this.maxGrains)
+    this.tailPosition = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailOffset = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailStep = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailRegionStart = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailRegionLength = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailGainLeft = new Float32Array(STEAL_TAIL_COUNT)
+    this.tailGainRight = new Float32Array(STEAL_TAIL_COUNT)
+    this.tailRemaining = new Float64Array(STEAL_TAIL_COUNT)
+    this.stealFadeFrames = Math.max(1, Math.round(sampleRate * STEAL_FADE_SECONDS))
+    this.spawnIntervalFrames = this.sampleRate / DEFAULT_PATCH.densityHz
     this.reverb = new Reverb(this.sampleRate)
     this.delay = new TempoDelay(this.sampleRate)
     this.tape = new Tape(this.sampleRate)
@@ -364,6 +394,7 @@ export class GranularCore {
     }
     this.active.fill(0)
     this.age.fill(0)
+    this.tailRemaining.fill(0)
     this.frame = 0
     this.nextGrainFrame = 0
     this.shatterStepIndex = 0
@@ -532,9 +563,10 @@ export class GranularCore {
         if (this.patch.mode === 'shatter') {
           spawnedGrains += this.scheduleShatterEvent()
         } else {
+          const intervalFrames = this.sampleRate / this.modDensityHz
+          this.spawnIntervalFrames = Math.max(1, intervalFrames)
           this.spawnVoices(0, false)
           spawnedGrains += 1
-          const intervalFrames = this.sampleRate / this.modDensityHz
           const jitter = 1 + this.rng.nextBipolar() * this.patch.timingJitter * 0.45
           this.nextGrainFrame += Math.max(1, intervalFrames * jitter)
         }
@@ -583,6 +615,35 @@ export class GranularCore {
 
         this.sourcePosition[grain] += this.step[grain]
         this.age[grain] += 1
+      }
+
+      for (let tail = 0; tail < STEAL_TAIL_COUNT; tail += 1) {
+        const remaining = this.tailRemaining[tail]
+        if (remaining <= 0) continue
+
+        const ramp = remaining / this.stealFadeFrames
+        const tailFrame = this.wrapFrameInRegion(
+          this.tailPosition[tail],
+          this.tailRegionStart[tail],
+          this.tailRegionLength[tail],
+        )
+        left += this.readLinear(
+          this.sourceLeft,
+          tailFrame,
+          this.tailOffset[tail],
+          this.tailRegionStart[tail],
+          this.tailRegionLength[tail],
+        ) * this.tailGainLeft[tail] * ramp
+        right += this.readLinear(
+          this.sourceRight,
+          tailFrame,
+          this.tailOffset[tail],
+          this.tailRegionStart[tail],
+          this.tailRegionLength[tail],
+        ) * this.tailGainRight[tail] * ramp
+
+        this.tailPosition[tail] += this.tailStep[tail]
+        this.tailRemaining[tail] = remaining - 1
       }
 
       const masterGain = this.smoothedInputGain * this.smoothedOutputGain * this.modeTransitionGain
@@ -728,14 +789,17 @@ export class GranularCore {
   private scheduleShatterEvent(): number {
     const step = this.patch.shatterSteps[this.shatterStepIndex]
     this.lastShatterStep = this.shatterStepIndex
-    const shouldSpawn = step.enabled && this.rng.nextFloat() <= step.probability
-    if (shouldSpawn) this.spawnVoices(step.pitchOffsetSemitones, step.reverse)
-
     const stepFrames = shatterStepFrames(
       this.sampleRate,
       this.patch.bpm,
       this.patch.shatterDivision,
     )
+    // Shatter's real spawn rate is the step clock (bpm/division × ratchet),
+    // not the bloom density control — gain normalization must use it.
+    this.spawnIntervalFrames = Math.max(1, stepFrames / step.ratchet)
+    const shouldSpawn = step.enabled && this.rng.nextFloat() <= step.probability
+    if (shouldSpawn) this.spawnVoices(step.pitchOffsetSemitones, step.reverse)
+
     this.nextGrainFrame += Math.max(1, stepFrames / step.ratchet)
     this.shatterRatchetIndex += 1
     if (this.shatterRatchetIndex >= step.ratchet) {
@@ -801,12 +865,18 @@ export class GranularCore {
       return
     }
     for (let index = 0; index < this.activeNoteCount; index += 1) {
-      this.spawnGrain(extraSemitones + this.activeNotes[index], forceReverse, this.activeVelocities[index])
+      this.spawnGrain(
+        extraSemitones + this.activeNotes[index],
+        forceReverse,
+        this.activeVelocities[index],
+        this.activeNoteCount,
+      )
     }
   }
 
-  private spawnGrain(pitchOffsetSemitones = 0, forceReverse = false, velocity = 1): void {
+  private spawnGrain(pitchOffsetSemitones = 0, forceReverse = false, velocity = 1, voiceCount = 1): void {
     const slot = this.findGrainSlot()
+    if (this.active[slot] === 1) this.beginStealFade(slot)
     const regionStart = Math.floor(this.patch.regionStart * (this.sourceLength - 1))
     const regionEnd = Math.max(regionStart + 2, Math.ceil(this.patch.regionEnd * this.sourceLength))
     const regionLength = Math.max(2, regionEnd - regionStart)
@@ -824,8 +894,10 @@ export class GranularCore {
     const direction = forceReverse || this.rng.nextFloat() < this.patch.reverseProbability ? -1 : 1
     const pan = this.rng.nextBipolar() * this.patch.stereoSpread
     const durationFrames = Math.max(2, this.modGrainSizeMs * 0.001 * this.sampleRate)
-    const expectedOverlap = Math.max(1, this.modDensityHz * durationFrames / this.sampleRate)
-    const normalizedGain = velocity / Math.sqrt(expectedOverlap)
+    // Overlap from the actual spawn interval (mode-aware), and √N so an N-note
+    // chord sums power-correctly instead of N× hotter than a single note.
+    const expectedOverlap = Math.max(1, durationFrames / this.spawnIntervalFrames)
+    const normalizedGain = velocity / Math.sqrt(expectedOverlap * Math.max(1, voiceCount))
 
     this.active[slot] = 1
     this.sourcePosition[slot] = regionStart + positionInRegion * (regionLength - 1)
@@ -838,6 +910,42 @@ export class GranularCore {
     this.windowCode[slot] = encodeWindow(this.patch.window)
     this.regionStartFrame[slot] = regionStart
     this.regionLengthFrames[slot] = regionLength
+  }
+
+  // Copy a still-sounding grain into a fade tail before its slot is reused.
+  // The tail keeps reading the source at the grain's current amplitude and
+  // ramps linearly to silence over stealFadeFrames.
+  private beginStealFade(slot: number): void {
+    const phase = this.age[slot] / this.duration[slot]
+    const envelope = grainWindow(
+      decodeWindow(this.windowCode[slot]),
+      phase,
+      this.patch.windowSkew,
+      this.patch.windowHardness,
+    )
+    if (envelope <= 0) return
+
+    let tail = 0
+    let shortest = Infinity
+    for (let index = 0; index < STEAL_TAIL_COUNT; index += 1) {
+      if (this.tailRemaining[index] <= 0) {
+        tail = index
+        break
+      }
+      if (this.tailRemaining[index] < shortest) {
+        shortest = this.tailRemaining[index]
+        tail = index
+      }
+    }
+
+    this.tailPosition[tail] = this.sourcePosition[slot]
+    this.tailOffset[tail] = this.grainSourceOffset[slot]
+    this.tailStep[tail] = this.step[slot]
+    this.tailRegionStart[tail] = this.regionStartFrame[slot]
+    this.tailRegionLength[tail] = this.regionLengthFrames[slot]
+    this.tailGainLeft[tail] = this.gainLeft[slot] * envelope
+    this.tailGainRight[tail] = this.gainRight[slot] * envelope
+    this.tailRemaining[tail] = this.stealFadeFrames
   }
 
   private findGrainSlot(): number {
@@ -881,13 +989,20 @@ export class GranularCore {
     this.subTune = nextPatch.subTune
     this.repeatTimeSeconds = repeatDivisionSeconds(nextPatch)
     if (nextPatch.seed !== previousSeed) this.rng.reset(nextPatch.seed)
-    if (
-      forceResync
-      || nextPatch.mode !== previousPatch.mode
-      || nextPatch.bpm !== previousPatch.bpm
-      || nextPatch.shatterDivision !== previousPatch.shatterDivision
-    ) {
+    if (forceResync || nextPatch.mode !== previousPatch.mode) {
       this.resyncScheduler(schedulerFrame)
+    } else if (
+      nextPatch.mode === 'shatter'
+      && (nextPatch.bpm !== previousPatch.bpm
+        || nextPatch.shatterDivision !== previousPatch.shatterDivision)
+    ) {
+      // Tempo/division nudges keep the pattern phase: rescale the remaining
+      // wait to the new step length instead of re-firing step 0 immediately
+      // (dragging the BPM dial used to machine-gun step 0 at UI-event rate).
+      const previousStep = shatterStepFrames(this.sampleRate, previousPatch.bpm, previousPatch.shatterDivision)
+      const nextStep = shatterStepFrames(this.sampleRate, nextPatch.bpm, nextPatch.shatterDivision)
+      const remaining = Math.max(0, this.nextGrainFrame - schedulerFrame)
+      this.nextGrainFrame = schedulerFrame + remaining * (nextStep / previousStep)
     } else if (
       nextPatch.densityHz !== previousPatch.densityHz
       && nextPatch.mode !== 'shatter'
@@ -912,6 +1027,7 @@ export class GranularCore {
         if (this.pendingPatch) {
           this.active.fill(0)
           this.age.fill(0)
+          this.tailRemaining.fill(0)
           this.applyPatch(this.pendingPatch, true, absoluteFrame)
           this.pendingPatch = null
         }

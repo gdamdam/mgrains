@@ -4,9 +4,9 @@
 
 **A granular instrument — bloom any sound into clouds, or shatter it into rhythm.**
 
-[![version](https://img.shields.io/badge/version-1.4.8-6c8f3a)](./package.json)
+[![version](https://img.shields.io/badge/version-1.5.0-6c8f3a)](./package.json)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
-[![tests](https://img.shields.io/badge/tests-414%20passing-2ea043)](#verification)
+[![tests](https://img.shields.io/badge/tests-427%20passing-2ea043)](#verification)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](./tsconfig.json)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)](https://vite.dev)
@@ -27,7 +27,7 @@
 - **Direct grain controls** — Grain Size, Density/Rate, Position, and Spray always on the main surface; region, timing jitter, scan speed, pitch, pitch spread, reverse probability, stereo spread, window, and output in an Advanced panel — all with units.
 - **Four macros per mode** — Bloom: Cloud · Drift · Warmth · Space. Shatter: Chop · Scatter · Crush · Repeat. Each sweeps a curated parameter group; **Link/Unlink** keeps hand edits authoritative.
 - **11-effect rack** — Drive, Crush, Damp, Tape, Ring, Formant, Comb, Wow, Sub, Space (reverb), Repeat (tempo delay) — each a tile with an amount ring, opening a modal with its parameters and an SVG response curve. A stereo-linked master **limiter** is the final stage.
-- **Sources** — three deterministic demo sounds (random pick), audio-file import, and a 20-second live rolling buffer with **Freeze** and **Clear**.
+- **Sources** — ten deterministic demo sounds (random pick), audio-file import, and a 20-second live rolling buffer with **Freeze** and **Clear**.
 - **Performance** — large XY surface, draggable waveform position, a one-lane **motion recorder** (record / play / clear), and seeded **Mutate** with bounded **Undo**.
 - **Play it** — polyphonic chromatic playing from the computer keyboard (Ableton layout) and **Web MIDI** (note on/off + velocity), up to 8 voices with oldest-note stealing.
 - **Shatter sequencer** — BPM, straight/dotted/triplet divisions, and a deterministic 16-step lane (gate, probability, pitch offset, reverse, ratchet).
@@ -69,7 +69,7 @@ Open the URL Vite prints and click **Start audio** (browser audio requires a use
 | `Z` / `X` | octave down / up |
 | `C` / `V` | output level down / up |
 
-**MIDI** — any connected device plays the same voices; note velocity scales each voice's level. MIDI is an optional enhancement; the app is fully usable without it.
+**MIDI** — any connected device plays the same voices as soon as audio is running (no toggle needed); note velocity scales each voice's level. MIDI is an optional enhancement; the app is fully usable without it.
 
 ## Architecture
 
@@ -93,7 +93,7 @@ App.tsx ── patch/notes ──▶ AudioEngine ── postMessage ──▶ gr
 ## Verification
 
 ```bash
-npm run check   # lint + 414 tests + production build
+npm run check   # lint + 427 tests + production build
 ```
 
 Tests are deterministic and live next to the code (DSP core, effects, contracts, schedulers, RNG, windows, presets, instrument, transport). Note: Vitest runs in a Node environment, so React components and live audio are covered by manual QA below, not unit tests.
@@ -101,7 +101,7 @@ Tests are deterministic and live next to the code (DSP core, effects, contracts,
 ## Permissions & privacy
 
 - **Microphone / line input** is requested only when you enable **Live input**, and degrades gracefully if denied.
-- **Web MIDI** is requested only when you turn on **Play keys**, and is optional.
+- **Web MIDI** is requested once you start audio (a user gesture), and is optional.
 - Everything is local: presets and any data live in your browser's IndexedDB. No accounts, no network, no telemetry.
 
 ## Browser notes & limitations
@@ -140,7 +140,7 @@ src/
     contracts.ts                canonical GrainPatch, ranges, messages, sanitize
     AudioEngine.ts              AudioContext graph + worklet lifecycle
     granular.worklet.ts         real-time worklet adapter
-    demoSource.ts               three deterministic demo sources + peaks
+    demoSource.ts               ten deterministic demo sources + peaks
     macros.ts                   macro → parameter mappings + Link model
     mutate.ts                   seeded deterministic patch variation
     factoryPresets.ts           10 curated factory presets

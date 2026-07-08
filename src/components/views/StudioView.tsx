@@ -333,8 +333,12 @@ export function StudioView(props: StudioViewProps) {
               step={1}
               unit="BPM"
               decimals={0}
+              disabled={props.linkEnabled && props.linkState.connected}
               onChange={(bpm) => props.onUpdatePatch({ bpm })}
             />
+            {props.linkEnabled && props.linkState.connected && (
+              <span className="tempo-lock-hint">Tempo set by Link</span>
+            )}
             <Select
               label="Trigger division"
               value={patch.shatterDivision}

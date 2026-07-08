@@ -516,3 +516,112 @@ describe('GranularCore shatter Link bar alignment', () => {
     expect(atAnchor).toEqual([{ frame: 200, step: 0, spawned: 1 }]) // fired exactly once
   })
 })
+
+describe('GranularCore audit fixes', () => {
+  const CLEAN_OVERRIDES = {
+    spray: 0,
+    timingJitter: 0,
+    scanSpeed: 0,
+    pitchSpreadSemitones: 0,
+    reverseProbability: 0,
+    stereoSpread: 0,
+  } as const
+
+  function dcSource(length = 8192): Float32Array {
+    return new Float32Array(length).fill(1)
+  }
+
+  it('fades out a stolen grain instead of hard-cutting it', () => {
+    const core = new GranularCore({ sampleRate: 48_000, maxGrains: 1 })
+    const source = dcSource(48_000)
+    core.setSource(source, source)
+    core.setPatch({
+      ...DEFAULT_PATCH,
+      ...CLEAN_OVERRIDES,
+      grainSizeMs: 500,
+      densityHz: 10, // steals every 4 800 frames while the grain is mid-envelope
+      inputGain: 1,
+      outputGain: 1,
+    })
+
+    const output = render(core, 80)
+    let maxJump = 0
+    for (let index = 1; index < output.length; index += 1) {
+      maxJump = Math.max(maxJump, Math.abs(output[index] - output[index - 1]))
+    }
+
+    // A hard cut at hann(0.2) ≈ 0.35 × gain ≈ 0.15/sample; a 2-5 ms fade keeps
+    // consecutive-sample deltas well under 0.02.
+    expect(maxJump).toBeLessThan(0.02)
+  })
+
+  it('keeps shatter loudness independent of the (inactive) density control', () => {
+    const source = dcSource()
+    const dense = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    const sparse = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    for (const [core, densityHz] of [[dense, 40], [sparse, 2]] as const) {
+      core.setSource(source, source)
+      core.setPatch({
+        ...DEFAULT_PATCH,
+        ...CLEAN_OVERRIDES,
+        mode: 'shatter',
+        shatterSteps: shatterSteps(),
+        densityHz,
+      })
+    }
+
+    // 140 blocks ≈ 0.37 s: long enough to pass the bloom→shatter mode
+    // transition (0.09 s fade) AND reach spawns that read the new density.
+    expect(render(dense, 140)).toEqual(render(sparse, 140))
+  })
+
+  it('normalizes chord loudness by the square root of the held-note count', () => {
+    const source = dcSource()
+    const solo = new GranularCore({ sampleRate: 48_000, maxGrains: 64 })
+    const chord = new GranularCore({ sampleRate: 48_000, maxGrains: 64 })
+    for (const core of [solo, chord]) {
+      core.setSource(source, source)
+      core.setPatch({ ...DEFAULT_PATCH, ...CLEAN_OVERRIDES, outputGain: 0.1 })
+    }
+    solo.setActiveNotes([{ offset: 0, velocity: 1 }])
+    chord.setActiveNotes([
+      { offset: 0, velocity: 1 },
+      { offset: 3, velocity: 1 },
+      { offset: 7, velocity: 1 },
+      { offset: 12, velocity: 1 },
+    ])
+
+    const soloPeak = Math.max(...render(solo, 60).map(Math.abs))
+    const chordPeak = Math.max(...render(chord, 60).map(Math.abs))
+
+    // 4 summed voices must scale like √4 = 2×, not 4× (power-correct summing).
+    expect(chordPeak / soloPeak).toBeGreaterThan(1.7)
+    expect(chordPeak / soloPeak).toBeLessThan(2.3)
+  })
+
+  it('preserves shatter phase across a tempo change instead of re-firing step 0', () => {
+    const core = new GranularCore({ sampleRate: 48_000, maxGrains: 16 })
+    const source = dcSource()
+    core.setSource(source, source)
+    const patch = {
+      ...DEFAULT_PATCH,
+      ...CLEAN_OVERRIDES,
+      mode: 'shatter' as const,
+      shatterDivision: '1/4' as const,
+      shatterSteps: shatterSteps(),
+    }
+    core.setPatch(patch)
+
+    // Ride out the bloom→shatter mode transition: 2 bloom spawns during the
+    // 0.09 s fade-out, then shatter step 0 at ≈ frame 4 320. Step length at
+    // 120 bpm, 1/4 = 24 000 frames → next step ≈ frame 28 320; frame 16 000
+    // is mid-step.
+    expect(countSpawned(core, 16_000, 128)).toBe(3)
+    core.setPatch({ ...patch, bpm: 121 })
+
+    // A tempo nudge must not re-fire step 0 immediately…
+    expect(countSpawned(core, 512, 128)).toBe(0)
+    // …and the next step still arrives roughly where the rescaled wait says.
+    expect(countSpawned(core, 13_000, 128)).toBe(1)
+  })
+})

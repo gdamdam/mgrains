@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react'
 import { nextActiveIndex } from './selectNav'
 
 interface SelectOption<T extends string> { value: T; label: string }
@@ -54,8 +54,14 @@ export function Select<T extends string>({ label, value, options, onChange, id }
     }
   }
 
+  // Close when focus leaves the widget (tab-away) — the document mousedown
+  // listener above only covers pointer interactions.
+  const onBlur = (e: FocusEvent<HTMLDivElement>) => {
+    if (open && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false)
+  }
+
   return (
-    <div className="select" ref={rootRef}>
+    <div className="select" ref={rootRef} onBlur={onBlur}>
       <span className="select-label">{label}</span>
       <button
         ref={triggerRef}

@@ -704,6 +704,19 @@ button.file-button:disabled {
   background: var(--panel-raised);
 }
 
+/* Control driven by an external master (e.g. tempo while Link is connected). */
+.parameter-control--locked {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.tempo-lock-hint {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  opacity: 0.7;
+  align-self: center;
+}
+
 .parameter-label {
   font-weight: 650;
   font-family: var(--font-mono);

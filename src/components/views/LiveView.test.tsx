@@ -6,7 +6,7 @@ import { DEFAULT_PATCH } from '../../audio/contracts'
 const noop = () => {}
 export const baseProps = {
   patch: DEFAULT_PATCH, engineState: 'running' as const, peak: 0, peaks: null,
-  sourceLabel: 'Tone field', sourceMode: 'sample' as const, sourceId: 'harmonic-pad', frozen: false, liveBufferSeconds: 0,
+  sourceLabel: 'Tone field', sourceMode: 'sample' as const, sourceId: 'harmonic-pad', frozen: false, liveBufferSeconds: 0, error: null,
   activeGrains: 0, grainVisuals: { count: 0, positions: new Float32Array(0), intensities: new Float32Array(0) },
   macroValues: {}, linkedMacros: {}, keysActive: false, linkEnabled: false, busEnabled: false,
   motionState: 'idle' as const, hasMotion: false, canUndo: false,
@@ -33,5 +33,13 @@ describe('LiveView', () => {
   it('offers an immediate audio start action when the engine is idle', () => {
     const html = renderToStaticMarkup(<LiveView {...baseProps} engineState="idle" />)
     expect(html).toContain('Tap to start audio')
+  })
+})
+
+describe('LiveView errors', () => {
+  it('surfaces engine errors with an alert (parity with StudioView)', () => {
+    const html = renderToStaticMarkup(<LiveView {...baseProps} error="Mic unavailable" />)
+    expect(html).toContain('role="alert"')
+    expect(html).toContain('Mic unavailable')
   })
 })
