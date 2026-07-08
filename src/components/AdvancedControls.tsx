@@ -175,6 +175,28 @@ export function AdvancedControls({ patch, onChange, onReset }: AdvancedControlsP
             decimals={0}
             onChange={(value) => onChange({ windowHardness: value / 100 })}
           />
+          <ParameterControl
+            label="Grain filter"
+            value={patch.grainFilterHz}
+            minimum={PATCH_RANGES.grainFilterHz[0]}
+            maximum={PATCH_RANGES.grainFilterHz[1]}
+            step={1}
+            unit="Hz"
+            scale="log"
+            decimals={0}
+            maxLabel="Off"
+            onChange={(grainFilterHz) => onChange({ grainFilterHz })}
+          />
+          <ParameterControl
+            label="Filter spread"
+            value={patch.grainFilterSpread}
+            minimum={PATCH_RANGES.grainFilterSpread[0]}
+            maximum={PATCH_RANGES.grainFilterSpread[1]}
+            step={0.1}
+            unit="oct"
+            decimals={1}
+            onChange={(grainFilterSpread) => onChange({ grainFilterSpread })}
+          />
         </div>
         <LfoControls patch={patch} onChange={onChange} />
         <button type="button" className="advanced-reset" onClick={onReset}>

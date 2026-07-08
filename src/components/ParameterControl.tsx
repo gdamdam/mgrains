@@ -11,17 +11,22 @@ interface ParameterControlProps {
   decimals?: number
   /** Locks the control (e.g. tempo while Ableton Link drives it). */
   disabled?: boolean
+  /** Rendered instead of the numeric value when the dial sits at its maximum —
+   *  for sentinel tops like the grain filter's "Off". */
+  maxLabel?: string
   onChange: (value: number) => void
 }
 
 export function ParameterControl({
-  label, value, minimum, maximum, step, unit, scale = 'linear', decimals = 1, disabled = false, onChange,
+  label, value, minimum, maximum, step, unit, scale = 'linear', decimals = 1, disabled = false, maxLabel, onChange,
 }: ParameterControlProps) {
   return (
     <label className={`parameter-control${disabled ? ' parameter-control--locked' : ''}`}>
       <span className="parameter-label">{label}</span>
       <span className="parameter-value">
-        {value.toFixed(decimals)} <span>{unit}</span>
+        {maxLabel !== undefined && value >= maximum
+          ? maxLabel
+          : <>{value.toFixed(decimals)} <span>{unit}</span></>}
       </span>
       <input
         type="range"
@@ -29,7 +34,9 @@ export function ParameterControl({
         max={SLIDER_STEPS}
         value={toSlider(value, { minimum, maximum, scale })}
         aria-label={label}
-        aria-valuetext={`${value.toFixed(decimals)} ${unit}`}
+        aria-valuetext={maxLabel !== undefined && value >= maximum
+          ? maxLabel
+          : `${value.toFixed(decimals)} ${unit}`}
         disabled={disabled}
         onChange={(event) => onChange(fromSlider(Number(event.currentTarget.value), { minimum, maximum, scale, step }))}
       />
