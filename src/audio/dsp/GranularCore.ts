@@ -192,8 +192,17 @@ export class GranularCore {
   // gates the render-loop path per grain, so a patch flipped to Off mid-sound
   // lets live grains keep their color (clickless) while new spawns skip the
   // filter — and Off never touches the RNG (exact v1.7 bypass).
+  // a1/a2/a3 are the Simper coefficients derived from filterG and
+  // GRAIN_FILTER_K (a1 = 1/(1 + g*(g + k)), a2 = g*a1, a3 = g*a2). Hoisted to
+  // spawn time (perf: Task 4 bench) since they depend only on the slot's fixed
+  // g — computing them per-sample-per-grain was the dominant marginal cost of
+  // the filter. filterG is kept alongside (unused by the render loop) so
+  // grainFilterCutoffHz can still recover fc exactly for tests/observability.
   private readonly filterOn: Uint8Array
   private readonly filterG: Float64Array
+  private readonly filterA1: Float64Array
+  private readonly filterA2: Float64Array
+  private readonly filterA3: Float64Array
   private readonly filterIc1L: Float64Array
   private readonly filterIc2L: Float64Array
   private readonly filterIc1R: Float64Array
@@ -243,6 +252,9 @@ export class GranularCore {
     this.regionLengthFrames = new Float64Array(this.maxGrains)
     this.filterOn = new Uint8Array(this.maxGrains)
     this.filterG = new Float64Array(this.maxGrains)
+    this.filterA1 = new Float64Array(this.maxGrains)
+    this.filterA2 = new Float64Array(this.maxGrains)
+    this.filterA3 = new Float64Array(this.maxGrains)
     this.filterIc1L = new Float64Array(this.maxGrains)
     this.filterIc2L = new Float64Array(this.maxGrains)
     this.filterIc1R = new Float64Array(this.maxGrains)
@@ -646,12 +658,11 @@ export class GranularCore {
         )
 
         if (this.filterOn[grain] === 1) {
-          // Derive the Simper coefficients from the slot's g (one divide,
-          // shared by both channels) — see grainFilter.ts for the form.
-          const g = this.filterG[grain]
-          const a1 = 1 / (1 + g * (g + GRAIN_FILTER_K))
-          const a2 = g * a1
-          const a3 = g * a2
+          // Coefficients are hoisted to spawn time (see filterA1/A2/A3 above)
+          // since they depend only on the slot's fixed g — no per-sample divide.
+          const a1 = this.filterA1[grain]
+          const a2 = this.filterA2[grain]
+          const a3 = this.filterA3[grain]
           sourceLeft = svfLowpass(sourceLeft, a1, a2, a3, this.filterIc1L, this.filterIc2L, grain)
           sourceRight = svfLowpass(sourceRight, a1, a2, a3, this.filterIc1R, this.filterIc2R, grain)
         }
@@ -975,7 +986,12 @@ export class GranularCore {
         this.sampleRate,
       )
       this.filterOn[slot] = 1
-      this.filterG[slot] = grainFilterG(cutoffHz, this.sampleRate)
+      const g = grainFilterG(cutoffHz, this.sampleRate)
+      this.filterG[slot] = g
+      const a1 = 1 / (1 + g * (g + GRAIN_FILTER_K))
+      this.filterA1[slot] = a1
+      this.filterA2[slot] = g * a1
+      this.filterA3[slot] = g * this.filterA2[slot]
       this.filterIc1L[slot] = 0
       this.filterIc2L[slot] = 0
       this.filterIc1R[slot] = 0
