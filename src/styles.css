@@ -907,6 +907,13 @@ footer {
   text-transform: uppercase;
 }
 
+.motion-lane-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  opacity: 0.7;
+  align-self: center;
+}
+
 .preset-controls {
   margin-top: 16px;
   padding: 16px;

@@ -102,3 +102,15 @@ describe('StudioView tempo lock', () => {
     expect(html).not.toContain('Tempo set by Link')
   })
 })
+
+describe('motion lane indicator', () => {
+  it('shows the lane count when a take exists', () => {
+    const html = renderToStaticMarkup(<StudioView {...studioProps} hasMotion motionLaneCount={3} />)
+    expect(html).toContain('3 lanes')
+  })
+
+  it('hides the indicator when there is no take', () => {
+    const html = renderToStaticMarkup(<StudioView {...studioProps} motionLaneCount={0} />)
+    expect(html).not.toContain('lanes')
+  })
+})

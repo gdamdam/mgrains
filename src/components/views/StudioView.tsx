@@ -311,6 +311,11 @@ export function StudioView(props: StudioViewProps) {
         <button type="button" className="file-button" disabled={!props.hasMotion} onClick={props.onClearMotion}>
           Clear
         </button>
+        {props.hasMotion && props.motionLaneCount > 0 && (
+          <span className="motion-lane-count">
+            {props.motionLaneCount} {props.motionLaneCount === 1 ? 'lane' : 'lanes'}
+          </span>
+        )}
       </div>
 
       {props.sourceMode === 'live' && (

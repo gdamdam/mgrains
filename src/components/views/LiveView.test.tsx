@@ -43,3 +43,15 @@ describe('LiveView errors', () => {
     expect(html).toContain('Mic unavailable')
   })
 })
+
+describe('motion lane indicator', () => {
+  it('shows the lane count when a take exists', () => {
+    const html = renderToStaticMarkup(<LiveView {...baseProps} hasMotion motionLaneCount={3} />)
+    expect(html).toContain('3 lanes')
+  })
+
+  it('hides the indicator when there is no take', () => {
+    const html = renderToStaticMarkup(<LiveView {...baseProps} motionLaneCount={0} />)
+    expect(html).not.toContain('lanes')
+  })
+})

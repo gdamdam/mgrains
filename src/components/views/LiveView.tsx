@@ -150,6 +150,11 @@ export function LiveView(props: LiveViewProps) {
           {props.motionState === 'playing' ? 'Stop' : 'Play'}
         </button>
         <button type="button" className="file-button" disabled={!props.hasMotion} onClick={props.onClearMotion}>Clear</button>
+        {props.hasMotion && props.motionLaneCount > 0 && (
+          <span className="motion-lane-count">
+            {props.motionLaneCount} {props.motionLaneCount === 1 ? 'lane' : 'lanes'}
+          </span>
+        )}
         <span className="live-toolbar-sep" />
         <button type="button" className="file-button" onClick={props.onMutate}>Mutate</button>
         <button type="button" className="file-button" disabled={!props.canUndo} onClick={props.onUndo}>Undo</button>
