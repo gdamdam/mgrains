@@ -351,6 +351,16 @@ export function StudioView(props: StudioViewProps) {
               options={SHATTER_DIVISIONS.map((d) => ({ value: d, label: d }))}
               onChange={(shatterDivision) => props.onUpdatePatch({ shatterDivision })}
             />
+            <ParameterControl
+              label="Swing"
+              value={patch.shatterSwing * 100}
+              minimum={0}
+              maximum={60}
+              step={1}
+              unit="%"
+              decimals={0}
+              onChange={(value) => props.onUpdatePatch({ shatterSwing: value / 100 })}
+            />
           </div>
           <ShatterSequencerMemo
             steps={patch.shatterSteps}

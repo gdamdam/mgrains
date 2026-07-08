@@ -114,3 +114,25 @@ describe('motion lane indicator', () => {
     expect(html).not.toContain('lanes')
   })
 })
+
+describe('StudioView shatter swing control', () => {
+  it('renders a Swing control in the shatter clock row, never disabled', () => {
+    const html = renderToStaticMarkup(<StudioView
+      {...studioProps}
+      patch={{ ...DEFAULT_PATCH, mode: 'shatter', shatterSwing: 0.3 }}
+    />)
+    expect(html).toContain('Swing')
+    expect(html).toContain('30 %')   // 0.3 rendered as a 0-decimal percentage
+  })
+
+  it('keeps Swing editable even while Link locks the tempo', () => {
+    const html = renderToStaticMarkup(<StudioView
+      {...studioProps}
+      patch={{ ...DEFAULT_PATCH, mode: 'shatter' }}
+      linkEnabled
+      linkState={{ ...initialLinkState(), connected: true, bpm: 120 }}
+    />)
+    // The only locked control is Tempo; Swing has no locked modifier.
+    expect((html.match(/parameter-control--locked/g) ?? []).length).toBe(1)
+  })
+})
