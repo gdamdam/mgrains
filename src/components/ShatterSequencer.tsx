@@ -97,6 +97,36 @@ export function ShatterSequencer({ steps, currentStep, onChange }: ShatterSequen
           />
         </label>
 
+        <label>
+          <span>Position</span>
+          <strong>{selected.positionOffset > 0 ? '+' : ''}{Math.round(selected.positionOffset * 100)}%</strong>
+          <input
+            type="range"
+            min={-50}
+            max={50}
+            step={1}
+            value={Math.round(selected.positionOffset * 100)}
+            onChange={(event) => updateStep(selectedStep, {
+              positionOffset: Number(event.currentTarget.value) / 100,
+            })}
+          />
+        </label>
+
+        <label>
+          <span>Size</span>
+          <strong>×{selected.sizeScale.toFixed(2)}</strong>
+          <input
+            type="range"
+            min={0.25}
+            max={4}
+            step={0.05}
+            value={selected.sizeScale}
+            onChange={(event) => updateStep(selectedStep, {
+              sizeScale: Number(event.currentTarget.value),
+            })}
+          />
+        </label>
+
         <Select
           label="Ratchet"
           value={String(selected.ratchet)}
