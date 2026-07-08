@@ -483,7 +483,9 @@ export default function App() {
         // Ignore a stale load that resolved after a newer preset was requested.
         if (!preset || generation !== presetLoadGenerationRef.current) return
         applyPatch(preset.patch)
-        applyPresetMotion(preset.motion)
+        // TEMPORARY (removed in Task 5): read the position lane back out of
+        // motionLanes until App migrates off the single-lane motion API.
+        applyPresetMotion(preset.motionLanes?.find((lane) => lane.target === 'position')?.data)
         if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
           setError(`Preset "${name}" was saved with source "${preset.sourceLabel}". Load that source to match its motion and position.`)
         }

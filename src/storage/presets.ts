@@ -1,20 +1,29 @@
 import { DEFAULT_PATCH, sanitizePatch, type GrainPatch } from '../audio/contracts'
 import type { MotionData } from '../performance/motion'
+import {
+  MAX_MOTION_LANES,
+  MOTION_PARAM_TARGETS,
+  motionToLanes,
+  type MotionLane,
+} from '../performance/motionLanes'
+import { MACROS } from '../audio/macros'
 
 // Bump when the Preset envelope (name/schemaVersion/createdAt) changes shape.
 // Patch-level migration is delegated to sanitizePatch, which already coerces
 // missing/old/invalid GrainPatch fields back into safe ranges.
 // v2 adds optional `motion` and `sourceLabel`; v1 presets migrate forward by
 // simply lacking those fields (see deserializePreset).
-export const PRESET_SCHEMA_VERSION = 2
+// v3: single `motion` recording → multi-lane `motionLanes` (gesture takes).
+// Legacy v2 `motion` still parses on load and migrates to a single position lane.
+export const PRESET_SCHEMA_VERSION = 3
 
 export interface Preset {
   name: string
   schemaVersion: number
   patch: GrainPatch
   createdAt: number
-  // Optional motion automation recording captured alongside the patch.
-  motion?: MotionData
+  // Optional multi-lane gesture recording captured alongside the patch.
+  motionLanes?: MotionLane[]
   // Optional label of the audio source, used to prompt a relink on load.
   sourceLabel?: string
 }
@@ -28,7 +37,10 @@ export function serializePreset(
   name: string,
   patch: GrainPatch,
   createdAt: number,
-  options?: { motion?: MotionData; sourceLabel?: string },
+  // TEMPORARY: `motion` stays alongside `motionLanes` only until App.tsx
+  // migrates its call sites in Task 5; it is folded into a single position
+  // lane when `motionLanes` is not supplied.
+  options?: { motionLanes?: MotionLane[]; motion?: MotionData; sourceLabel?: string },
 ): Preset {
   const preset: Preset = {
     name: coerceName(name),
@@ -39,10 +51,16 @@ export function serializePreset(
     createdAt: Number.isFinite(createdAt) ? createdAt : 0,
   }
 
-  // Only attach motion/sourceLabel when given, and clone/validate defensively
-  // so the stored preset never aliases caller-owned data or carries garbage.
-  const motion = parseMotion(options?.motion)
-  if (motion !== undefined) preset.motion = motion
+  // Only attach motionLanes/sourceLabel when given, and clone/validate
+  // defensively so the stored preset never aliases caller-owned data or
+  // carries garbage.
+  const motionLanes = parseMotionLanes(options?.motionLanes)
+  if (motionLanes !== undefined) preset.motionLanes = motionLanes
+
+  if (preset.motionLanes === undefined) {
+    const legacy = orUndefined(motionToLanes(parseMotion(options?.motion)))
+    if (legacy !== undefined) preset.motionLanes = legacy
+  }
 
   const sourceLabel = parseSourceLabel(options?.sourceLabel)
   if (sourceLabel !== undefined) preset.sourceLabel = sourceLabel
@@ -79,10 +97,13 @@ export function deserializePreset(raw: unknown): Preset {
     createdAt,
   }
 
-  // v1 presets simply lack these; v2 presets carry them when valid. Bad values
-  // (and v1 absence) leave the fields undefined rather than throwing.
-  const motion = parseMotion(record.motion)
-  if (motion !== undefined) preset.motion = motion
+  // v1 presets simply lack these; v2 presets carry a single `motion`
+  // recording (migrated below to a position lane); v3 presets carry
+  // `motionLanes` directly. Bad values (and v1 absence) leave the field
+  // undefined rather than throwing.
+  const motionLanes = parseMotionLanes(record.motionLanes)
+    ?? orUndefined(motionToLanes(parseMotion(record.motion)))
+  if (motionLanes !== undefined) preset.motionLanes = motionLanes
 
   const sourceLabel = parseSourceLabel(record.sourceLabel)
   if (sourceLabel !== undefined) preset.sourceLabel = sourceLabel
@@ -106,6 +127,35 @@ export function parseMotion(value: unknown): MotionData | undefined {
   }
 
   return { samples, durationMs: value.durationMs as number }
+}
+
+const MOTION_TARGETS: ReadonlySet<string> = new Set([
+  ...MOTION_PARAM_TARGETS,
+  ...MACROS.map((macro) => `macro:${macro.id}`),
+])
+
+// Accept only well-formed lanes with known targets; clone defensively (via
+// parseMotion) and cap at MAX_MOTION_LANES. Any malformed lane invalidates
+// the whole array — same "all or nothing" contract as parseMotion — so a
+// partially-corrupt preset doesn't silently load with missing automation.
+// Returns undefined (not []) when nothing valid survives, so absent and
+// invalid inputs read the same way v2 `motion` absence did.
+export function parseMotionLanes(value: unknown): MotionLane[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const lanes: MotionLane[] = []
+  for (const item of value) {
+    if (lanes.length >= MAX_MOTION_LANES) break
+    if (!isRecord(item)) return undefined
+    if (typeof item.target !== 'string' || !MOTION_TARGETS.has(item.target)) return undefined
+    const data = parseMotion(item.data)
+    if (data === undefined) return undefined
+    lanes.push({ target: item.target as MotionLane['target'], data })
+  }
+  return lanes.length > 0 ? lanes : undefined
+}
+
+function orUndefined(lanes: MotionLane[]): MotionLane[] | undefined {
+  return lanes.length > 0 ? lanes : undefined
 }
 
 export function parseSourceLabel(value: unknown): string | undefined {
