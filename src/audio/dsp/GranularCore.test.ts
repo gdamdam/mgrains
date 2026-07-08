@@ -1,5 +1,7 @@
+/// <reference types="node" />
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PATCH, type ShatterStep } from '../contracts'
+import { createHash } from 'node:crypto'
+import { DEFAULT_PATCH, type GrainPatch, type ShatterStep } from '../contracts'
 import { GranularCore } from './GranularCore'
 
 function makeSource(length = 2048): Float32Array {
@@ -795,5 +797,112 @@ describe('GranularCore shatter swing', () => {
     const more = driveShatter(core, 200) // frames 500..699
     const atAnchor = [...after, ...more].find((e) => e.frame === 600)
     expect(atAnchor).toEqual({ frame: 600, step: 0 })
+  })
+})
+
+describe('GranularCore per-grain filter (v1.8.0)', () => {
+  // ---- Exact Off bypass ----------------------------------------------------
+  // Golden digest of a fixed seeded render captured on the UNMODIFIED v1.7 tree
+  // (f267680). grainFilterHz defaults to Off, so this render must stay
+  // byte-identical after the filter lands. If it ever fails on different
+  // hardware (libm variance), regenerate by checking out f267680 and running
+  // this test with the digest console.logged.
+  const V17_GOLDEN_SHA256 = '037dea60588da9c25bcca546277c10ae9b93bf5ce73c8b911e103c3b8ee452a5'
+
+  function goldenRender(): Buffer {
+    const source = makeSource(4096)
+    const core = new GranularCore({ sampleRate: 48_000, maxGrains: 32 })
+    core.setPatch({ ...DEFAULT_PATCH }) // grainFilterHz: 8000 = Off (default)
+    core.setSource(source, source)
+    const left = new Float32Array(48_000)
+    const right = new Float32Array(48_000)
+    for (let o = 0; o < 48_000; o += 128) {
+      core.process(left.subarray(o, o + 128), right.subarray(o, o + 128))
+    }
+    return Buffer.concat([Buffer.from(left.buffer), Buffer.from(right.buffer)])
+  }
+
+  it('renders byte-identically to v1.7 when the filter is Off (default)', () => {
+    const digest = createHash('sha256').update(goldenRender()).digest('hex')
+    expect(digest).toBe(V17_GOLDEN_SHA256)
+  })
+
+  it('at Off, spread is inert: renders are identical for any grainFilterSpread (no RNG draw)', () => {
+    const source = makeSource()
+    const a = new GranularCore({ sampleRate: 48_000 })
+    const b = new GranularCore({ sampleRate: 48_000 })
+    a.setPatch({ ...DEFAULT_PATCH, grainFilterHz: 8000, grainFilterSpread: 0 })
+    b.setPatch({ ...DEFAULT_PATCH, grainFilterHz: 8000, grainFilterSpread: 3 })
+    a.setSource(source, source)
+    b.setSource(source, source)
+    expect(render(a)).toEqual(render(b))
+  })
+
+  // ---- Engaged filter ------------------------------------------------------
+  it('an engaged filter changes the render (and output stays finite/bounded)', () => {
+    const source = makeSource()
+    const off = new GranularCore({ sampleRate: 48_000 })
+    const on = new GranularCore({ sampleRate: 48_000 })
+    off.setPatch({ ...DEFAULT_PATCH })
+    on.setPatch({ ...DEFAULT_PATCH, grainFilterHz: 500, grainFilterSpread: 0 })
+    off.setSource(source, source)
+    on.setSource(source, source)
+    const filtered = render(on)
+    expect(filtered).not.toEqual(render(off))
+    expect(filtered.every(Number.isFinite)).toBe(true)
+  })
+
+  // ---- Spawn draw ----------------------------------------------------------
+  function drawnCutoffs(patch: Partial<GrainPatch>): number[] {
+    const source = makeSource()
+    const core = new GranularCore({ sampleRate: 48_000, maxGrains: 32 })
+    core.setPatch({ ...DEFAULT_PATCH, densityHz: 40, grainSizeMs: 400, ...patch })
+    core.setSource(source, source)
+    // 8192 frames @48k, densityHz 40 => ~7 spawns; 400 ms grains all stay live.
+    core.process(new Float32Array(8192), new Float32Array(8192))
+    const cutoffs: number[] = []
+    for (let slot = 0; slot < 32; slot += 1) {
+      const hz = core.grainFilterCutoffHz(slot)
+    if (hz > 0) cutoffs.push(hz)
+    }
+    return cutoffs
+  }
+
+  it('draws cutoffs within center +/- spread octaves (uniform in octaves)', () => {
+    const cutoffs = drawnCutoffs({ grainFilterHz: 1_000, grainFilterSpread: 2 })
+    expect(cutoffs.length).toBeGreaterThan(4)
+    for (const hz of cutoffs) {
+      expect(hz).toBeGreaterThanOrEqual(250)   // 1000 / 2^2
+      expect(hz).toBeLessThanOrEqual(4_000)    // 1000 * 2^2
+    }
+    expect(new Set(cutoffs.map((hz) => hz.toFixed(3))).size).toBeGreaterThan(1) // actually random
+  })
+
+  it('spread 0 pins every grain to the exact center', () => {
+    const cutoffs = drawnCutoffs({ grainFilterHz: 1_000, grainFilterSpread: 0 })
+    expect(cutoffs.length).toBeGreaterThan(4)
+    for (const hz of cutoffs) expect(hz).toBeCloseTo(1_000, 6)
+  })
+
+  it('same seed => same drawn cutoffs and same render (within-1.8 determinism)', () => {
+    const source = makeSource()
+    const patch = { ...DEFAULT_PATCH, grainFilterHz: 1_200, grainFilterSpread: 2 }
+    const first = new GranularCore({ sampleRate: 44_100 })
+    const second = new GranularCore({ sampleRate: 44_100 })
+    first.setPatch(patch)
+    second.setPatch(patch)
+    first.setSource(source, source)
+    second.setSource(source, source)
+    expect(render(first)).toEqual(render(second))
+  })
+
+  it('zeroes filter state on reset()', () => {
+    const source = makeSource()
+    const core = new GranularCore({ sampleRate: 48_000 })
+    core.setPatch({ ...DEFAULT_PATCH, grainFilterHz: 400, grainFilterSpread: 1 })
+    core.setSource(source, source)
+    const before = render(core)
+    core.reset()
+    expect(render(core)).toEqual(before) // reset => identical replay incl. filter state
   })
 })

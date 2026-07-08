@@ -295,3 +295,21 @@ function encodeWavStereo(left: Float32Array, right: Float32Array, sampleRate: nu
   }
   return buffer
 }
+
+describe('artifact audit — per-grain filter engaged', () => {
+  it('clean bloom with the filter on renders click-free and bounded (all rates)', () => {
+    for (const sr of RATES) {
+      const core = makeCore(
+        sr,
+        cleanBloom(sr, { grainFilterHz: 800, grainFilterSpread: 1 }),
+        noiseSource(sr, sr),
+      )
+      const { left, right } = renderSteady(core, sr)
+      expect(detectDiscontinuities(left), `left @${sr}`).toHaveLength(0)
+      expect(detectDiscontinuities(right), `right @${sr}`).toHaveLength(0)
+      const stats = analyzeSignal(left)
+      expect(stats.nonFiniteCount).toBe(0)
+      expect(stats.peak).toBeLessThanOrEqual(1)
+    }
+  })
+})
