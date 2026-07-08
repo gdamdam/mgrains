@@ -166,3 +166,37 @@ describe('resetAdvancedToDefault', () => {
     expect(reset.shatterDivision).toBe('1/8')
   })
 })
+
+describe('per-grain filter schema (v1.8.0)', () => {
+  it('defaults grainFilterHz to Off (range max) and grainFilterSpread to 1 octave', () => {
+    expect(PATCH_RANGES.grainFilterHz).toEqual([200, 8000])
+    expect(PATCH_RANGES.grainFilterSpread).toEqual([0, 3])
+    expect(DEFAULT_PATCH.grainFilterHz).toBe(PATCH_RANGES.grainFilterHz[1]) // Off
+    expect(DEFAULT_PATCH.grainFilterSpread).toBe(1)
+  })
+
+  it('fills missing fields (pre-1.8 preset) with the defaults', () => {
+    const legacy = { ...DEFAULT_PATCH } as Record<string, unknown>
+    delete legacy.grainFilterHz
+    delete legacy.grainFilterSpread
+    const patch = sanitizePatch(legacy as never)
+    expect(patch.grainFilterHz).toBe(8000) // Off
+    expect(patch.grainFilterSpread).toBe(1)
+  })
+
+  it('clamps grainFilterHz to [200, 8000] — anything >= max IS the Off sentinel — and spread to [0, 3]', () => {
+    expect(sanitizePatch({ ...DEFAULT_PATCH, grainFilterHz: 20_000 }).grainFilterHz).toBe(8000)
+    expect(sanitizePatch({ ...DEFAULT_PATCH, grainFilterHz: 50 }).grainFilterHz).toBe(200)
+    expect(sanitizePatch({ ...DEFAULT_PATCH, grainFilterSpread: 9 }).grainFilterSpread).toBe(3)
+    expect(sanitizePatch({ ...DEFAULT_PATCH, grainFilterSpread: -1 }).grainFilterSpread).toBe(0)
+  })
+
+  it('includes both fields in the Advanced reset', () => {
+    expect(ADVANCED_PARAM_KEYS).toContain('grainFilterHz')
+    expect(ADVANCED_PARAM_KEYS).toContain('grainFilterSpread')
+    const tweaked = { ...DEFAULT_PATCH, grainFilterHz: 800, grainFilterSpread: 3 }
+    const reset = resetAdvancedToDefault(tweaked)
+    expect(reset.grainFilterHz).toBe(DEFAULT_PATCH.grainFilterHz)
+    expect(reset.grainFilterSpread).toBe(DEFAULT_PATCH.grainFilterSpread)
+  })
+})

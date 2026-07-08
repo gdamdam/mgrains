@@ -136,6 +136,13 @@ export interface GrainPatch {
   shatterDivision: ShatterDivision
   shatterSwing: number
   shatterSteps: ShatterStep[]
+  // v1.8.0 per-grain filter. grainFilterHz is the CENTER of the cutoff draw;
+  // the top of its range is the "Off" sentinel (>= max means no filter — exact
+  // bypass, byte-identical to a filterless render). grainFilterSpread is the
+  // half-width of the draw in octaves (uniform), so each grain's cutoff lands
+  // in [center / 2^spread, center * 2^spread]. Deliberately NOT LFO targets.
+  grainFilterHz: number
+  grainFilterSpread: number
   lfos: LfoConfig[]
 }
 
@@ -209,6 +216,8 @@ export const DEFAULT_PATCH: GrainPatch = Object.freeze({
   shatterDivision: '1/16',
   shatterSwing: 0,
   shatterSteps: DEFAULT_SHATTER_STEPS.map((step) => ({ ...step })),
+  grainFilterHz: 8000, // = PATCH_RANGES max = Off
+  grainFilterSpread: 1,
   lfos: [{ ...DEFAULT_LFO }, { ...DEFAULT_LFO }],
 })
 
@@ -249,6 +258,8 @@ export const PATCH_RANGES = Object.freeze({
   subTune: [30, 120] as const,
   bpm: [30, 300] as const,
   shatterSwing: [0, 0.6] as const,
+  grainFilterHz: [200, 8000] as const,
+  grainFilterSpread: [0, 3] as const,
 })
 
 // LFO field ranges are kept out of PATCH_RANGES because they are per-LFO, not
@@ -271,6 +282,8 @@ export const ADVANCED_PARAM_KEYS = [
   'stereoSpread',
   'window',
   'outputGain',
+  'grainFilterHz',
+  'grainFilterSpread',
 ] as const satisfies ReadonlyArray<keyof GrainPatch>
 
 export interface EngineTelemetry {
@@ -385,6 +398,12 @@ export function sanitizePatch(candidate: GrainPatch): GrainPatch {
       ? clamp(candidate.shatterSwing, ...PATCH_RANGES.shatterSwing)
       : DEFAULT_PATCH.shatterSwing,
     shatterSteps: sanitizeShatterSteps(candidate.shatterSteps),
+    grainFilterHz: Number.isFinite(candidate.grainFilterHz)
+      ? clamp(candidate.grainFilterHz, ...PATCH_RANGES.grainFilterHz)
+      : DEFAULT_PATCH.grainFilterHz,
+    grainFilterSpread: Number.isFinite(candidate.grainFilterSpread)
+      ? clamp(candidate.grainFilterSpread, ...PATCH_RANGES.grainFilterSpread)
+      : DEFAULT_PATCH.grainFilterSpread,
     lfos: sanitizeLfos(candidate.lfos),
   }
 }
