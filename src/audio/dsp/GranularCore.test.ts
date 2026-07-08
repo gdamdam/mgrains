@@ -627,3 +627,99 @@ describe('GranularCore audit fixes', () => {
     expect(countSpawned(core, 13_000, 128)).toBe(1)
   })
 })
+
+describe('GranularCore shatter per-step position/size', () => {
+  // A normalized ramp source: sample[i] ≈ i/(len-1), so a grain's first output
+  // sample reveals the read position directly (hard window = no fade, gain 1).
+  function rampSource(length = 4096): Float32Array {
+    return Float32Array.from({ length }, (_, i) => i / (length - 1))
+  }
+  const CLEAN = {
+    mode: 'shatter' as const,
+    bpm: 120,
+    shatterDivision: '1/16' as const,
+    position: 0,
+    regionStart: 0,
+    regionEnd: 1,
+    spray: 0,
+    timingJitter: 0,
+    scanSpeed: 0,
+    pitchSemitones: 0,
+    pitchSpreadSemitones: 0,
+    reverseProbability: 0,
+    stereoSpread: 0,
+    window: 'hard' as const,
+    outputGain: 1,
+    // Keep the grain shorter than the 1/16-step interval (125 frames at
+    // 120bpm/1kHz) so expectedOverlap floors to 1 and normalizedGain is
+    // exactly 1 — otherwise DEFAULT_PATCH's 180 ms grain overlaps the step
+    // clock and the read-position assertions below pick up an amplitude
+    // scale-down that has nothing to do with positionOffset.
+    grainSizeMs: 20,
+  }
+
+  it('per-step positionOffset shifts the grain read position after spray, before wrap', () => {
+    // The hard window is exactly 0 at phase<=0 (windows.ts), so a freshly
+    // spawned grain's very first output sample is always silent — render 2
+    // samples and read index 1, the first audible one.
+    const source = rampSource()
+    const base = new GranularCore({ sampleRate: 1_000, maxGrains: 1 })
+    base.setPatch({ ...DEFAULT_PATCH, ...CLEAN, shatterSteps: shatterSteps({ positionOffset: 0 }) })
+    base.setSource(source, source)
+    const b = new Float32Array(2); base.process(b, new Float32Array(2))
+
+    const shifted = new GranularCore({ sampleRate: 1_000, maxGrains: 1 })
+    shifted.setPatch({ ...DEFAULT_PATCH, ...CLEAN, shatterSteps: shatterSteps({ positionOffset: 0.25 }) })
+    shifted.setSource(source, source)
+    const s = new Float32Array(2); shifted.process(s, new Float32Array(2))
+
+    expect(b[1]).toBeCloseTo(0, 3)        // position 0 → reads sample ~0
+    expect(s[1]).toBeCloseTo(0.25, 2)     // +0.25 offset → reads a quarter in
+  })
+
+  it('per-step sizeScale scales grain duration and lowers per-grain gain accordingly', () => {
+    // DC source = 1, hard window: every in-grain output sample == normalizedGain.
+    const source = new Float32Array(8192).fill(1)
+
+    // Duration: the hard window is exactly 0 at phase<=0 and phase>=1
+    // (windows.ts), so a durationFrames-frame grain reads back as
+    // durationFrames-1 audible samples. Buffer length 100 stays under the
+    // 125-frame 1/16-step interval at 120bpm/1kHz, so only one step (one
+    // grain) fires — a clean, uncontaminated frame count.
+    function renderDuration(sizeScale: number): number {
+      const core = new GranularCore({ sampleRate: 1_000, maxGrains: 1 })
+      core.setPatch({ ...DEFAULT_PATCH, ...CLEAN, grainSizeMs: 20, shatterSteps: shatterSteps({ sizeScale }) })
+      core.setSource(source, source)
+      const out = new Float32Array(100)
+      core.process(out, new Float32Array(100))
+      return out.filter((v) => v > 1e-6).length
+    }
+    const d1 = renderDuration(1) // 20 ms @ 1000 Hz → 20 frames → 19 audible samples
+    const d4 = renderDuration(4) // 80 ms → 80 frames → 79 audible samples
+    expect(d1).toBe(19)
+    expect(d4).toBe(79)
+
+    // Gain: expectedOverlap = durationFrames / spawnIntervalFrames only departs
+    // from its floor of 1 once the grain outlasts the step interval, so use a
+    // fast step clock (240bpm, 1/64 ≈ 15.6-frame interval) where even the
+    // unscaled 20 ms grain already overlaps the next step. Read just the first
+    // audible sample — fixed at spawn time, unaffected by later voice-stealing —
+    // from a buffer far shorter than the interval, so no second step pollutes it.
+    function renderGain(sizeScale: number): number {
+      const core = new GranularCore({ sampleRate: 1_000, maxGrains: 1 })
+      core.setPatch({
+        ...DEFAULT_PATCH, ...CLEAN, bpm: 240, shatterDivision: '1/64',
+        grainSizeMs: 20, shatterSteps: shatterSteps({ sizeScale }),
+      })
+      core.setSource(source, source)
+      const out = new Float32Array(5)
+      core.process(out, new Float32Array(5))
+      return out.find((v) => v > 1e-6) ?? 0
+    }
+    const g1 = renderGain(1)
+    const g4 = renderGain(4)
+    // Overlap grows ×4 (duration and interval scale identically), so the
+    // power-normalized gain falls by 1/sqrt(4) = 0.5.
+    expect(g4).toBeCloseTo(g1 * 0.5, 3)
+  })
+})

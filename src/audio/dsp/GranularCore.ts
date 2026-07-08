@@ -798,7 +798,7 @@ export class GranularCore {
     // not the bloom density control — gain normalization must use it.
     this.spawnIntervalFrames = Math.max(1, stepFrames / step.ratchet)
     const shouldSpawn = step.enabled && this.rng.nextFloat() <= step.probability
-    if (shouldSpawn) this.spawnVoices(step.pitchOffsetSemitones, step.reverse)
+    if (shouldSpawn) this.spawnVoices(step.pitchOffsetSemitones, step.reverse, step.positionOffset, step.sizeScale)
 
     this.nextGrainFrame += Math.max(1, stepFrames / step.ratchet)
     this.shatterRatchetIndex += 1
@@ -848,20 +848,25 @@ export class GranularCore {
 
   // Spawn one grain per held note (transposed by note + extraSemitones, scaled by
   // the note's velocity), or a single full-velocity grain at the base pitch.
-  private spawnVoices(extraSemitones: number, forceReverse: boolean): void {
+  private spawnVoices(
+    extraSemitones: number,
+    forceReverse: boolean,
+    positionOffset = 0,
+    sizeScale = 1,
+  ): void {
     if (this.activeNoteCount === 0) {
       // Gated with nothing held → stay silent (covers both bloom and shatter,
       // which both route unheld spawns through here). The scheduler still
       // advances, so the drone/pattern resumes the moment a note arrives.
       if (this.gateToNotes) return
-      this.spawnGrain(extraSemitones, forceReverse)
+      this.spawnGrain(extraSemitones, forceReverse, 1, 1, positionOffset, sizeScale)
       return
     }
     if (this.patch.glideTime > FX_EPSILON) {
       // Glide collapses polyphony to a single last-note voice that slides
       // between pitches — the standard portamento behavior for a lead.
       const velocity = this.activeVelocities[this.activeNoteCount - 1]
-      this.spawnGrain(extraSemitones + this.glidePitch, forceReverse, velocity)
+      this.spawnGrain(extraSemitones + this.glidePitch, forceReverse, velocity, 1, positionOffset, sizeScale)
       return
     }
     for (let index = 0; index < this.activeNoteCount; index += 1) {
@@ -870,11 +875,20 @@ export class GranularCore {
         forceReverse,
         this.activeVelocities[index],
         this.activeNoteCount,
+        positionOffset,
+        sizeScale,
       )
     }
   }
 
-  private spawnGrain(pitchOffsetSemitones = 0, forceReverse = false, velocity = 1, voiceCount = 1): void {
+  private spawnGrain(
+    pitchOffsetSemitones = 0,
+    forceReverse = false,
+    velocity = 1,
+    voiceCount = 1,
+    positionOffset = 0,
+    sizeScale = 1,
+  ): void {
     const slot = this.findGrainSlot()
     if (this.active[slot] === 1) this.beginStealFade(slot)
     const regionStart = Math.floor(this.patch.regionStart * (this.sourceLength - 1))
@@ -884,7 +898,7 @@ export class GranularCore {
     const movingPosition = this.modPosition + elapsedSeconds * this.patch.scanSpeed
     const normalizedPosition = movingPosition - Math.floor(movingPosition)
     const spray = this.rng.nextBipolar() * this.modSpray * 0.5
-    const positionInRegion = this.wrapUnit(normalizedPosition + spray)
+    const positionInRegion = this.wrapUnit(normalizedPosition + spray + positionOffset)
     // Scatter is drawn chromatically, then optionally snapped to a scale so a
     // wide spread reads as harmony instead of detuned noise. Bend applies to the
     // whole voice (played note + scatter) so it tracks the pitch wheel.
@@ -893,7 +907,10 @@ export class GranularCore {
       + scatter + this.smoothedPitchBend
     const direction = forceReverse || this.rng.nextFloat() < this.patch.reverseProbability ? -1 : 1
     const pan = this.rng.nextBipolar() * this.patch.stereoSpread
-    const durationFrames = Math.max(2, this.modGrainSizeMs * 0.001 * this.sampleRate)
+    // Per-step size scale rides on the live Size dial; clamp to the patch range
+    // BEFORE durationFrames so overlap-based gain normalization follows honestly.
+    const scaledGrainSizeMs = clamp(this.modGrainSizeMs * sizeScale, ...PATCH_RANGES.grainSizeMs)
+    const durationFrames = Math.max(2, scaledGrainSizeMs * 0.001 * this.sampleRate)
     // Overlap from the actual spawn interval (mode-aware), and √N so an N-note
     // chord sums power-correctly instead of N× hotter than a single note.
     const expectedOverlap = Math.max(1, durationFrames / this.spawnIntervalFrames)
