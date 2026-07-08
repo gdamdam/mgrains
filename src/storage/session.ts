@@ -1,11 +1,14 @@
 import { DEFAULT_PATCH, sanitizePatch, type GrainPatch } from '../audio/contracts'
 import type { MotionData } from '../performance/motion'
-import { isRecord, parseMotion, parseSourceLabel } from './presets'
+import { motionToLanes, type MotionLane } from '../performance/motionLanes'
+import { isRecord, parseMotion, parseMotionLanes, parseSourceLabel } from './presets'
 
 // The working session: the full editable state minus audio. Audio is never
 // stored (see presets.ts) — sourceLabel only prompts a relink. Bump when the
 // envelope changes shape; patch-level migration is delegated to sanitizePatch.
-export const SESSION_SCHEMA_VERSION = 1
+// v2: single `motion` recording → multi-lane `motionLanes` (gesture takes).
+// Legacy v1 `motion` still parses on load and migrates to a single position lane.
+export const SESSION_SCHEMA_VERSION = 2
 
 export type SessionViewMode = 'live' | 'studio'
 
@@ -14,7 +17,8 @@ export interface Session {
   patch: GrainPatch
   viewMode: SessionViewMode
   savedAt: number
-  motion?: MotionData
+  // Optional multi-lane gesture recording captured alongside the patch.
+  motionLanes?: MotionLane[]
   sourceLabel?: string
 }
 
@@ -27,7 +31,10 @@ export function serializeSession(
   patch: GrainPatch,
   viewMode: SessionViewMode,
   savedAt: number,
-  options?: { motion?: MotionData; sourceLabel?: string },
+  // TEMPORARY: `motion` stays alongside `motionLanes` only until App.tsx
+  // migrates its call sites in Task 5; it is folded into a single position
+  // lane when `motionLanes` is not supplied.
+  options?: { motionLanes?: MotionLane[]; motion?: MotionData; sourceLabel?: string },
 ): Session {
   const session: Session = {
     schemaVersion: SESSION_SCHEMA_VERSION,
@@ -36,8 +43,16 @@ export function serializeSession(
     savedAt: Number.isFinite(savedAt) ? savedAt : 0,
   }
 
-  const motion = parseMotion(options?.motion)
-  if (motion !== undefined) session.motion = motion
+  // Only attach motionLanes/sourceLabel when given, and clone/validate
+  // defensively so the stored session never aliases caller-owned data or
+  // carries garbage.
+  const motionLanes = parseMotionLanes(options?.motionLanes)
+  if (motionLanes !== undefined) session.motionLanes = motionLanes
+
+  if (session.motionLanes === undefined) {
+    const legacy = orUndefined(motionToLanes(parseMotion(options?.motion)))
+    if (legacy !== undefined) session.motionLanes = legacy
+  }
 
   const sourceLabel = parseSourceLabel(options?.sourceLabel)
   if (sourceLabel !== undefined) session.sourceLabel = sourceLabel
@@ -66,13 +81,22 @@ export function deserializeSession(raw: unknown): Session {
     savedAt: Number.isFinite(record.savedAt) ? (record.savedAt as number) : 0,
   }
 
-  const motion = parseMotion(record.motion)
-  if (motion !== undefined) session.motion = motion
+  // v1 sessions simply lack these; v2 sessions carry a single `motion`
+  // recording (migrated below to a position lane); v2 sessions may also carry
+  // `motionLanes` directly. Bad values (and v1 absence) leave the field
+  // undefined rather than throwing.
+  const motionLanes = parseMotionLanes(record.motionLanes)
+    ?? orUndefined(motionToLanes(parseMotion(record.motion)))
+  if (motionLanes !== undefined) session.motionLanes = motionLanes
 
   const sourceLabel = parseSourceLabel(record.sourceLabel)
   if (sourceLabel !== undefined) session.sourceLabel = sourceLabel
 
   return session
+}
+
+function orUndefined(lanes: MotionLane[]): MotionLane[] | undefined {
+  return lanes.length > 0 ? lanes : undefined
 }
 
 // Read the auto-saved last session, or null if none/unavailable. Guards against a

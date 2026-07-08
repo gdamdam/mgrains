@@ -510,7 +510,9 @@ export default function App() {
   // source differs, mirroring loadPreset.
   const applySession = (session: Session) => {
     applyPatch(session.patch)
-    applyPresetMotion(session.motion)
+    // TEMPORARY (removed in Task 5): read the position lane back out of
+    // motionLanes until App migrates off the single-lane motion API.
+    applyPresetMotion(session.motionLanes?.find((lane) => lane.target === 'position')?.data)
     setViewMode(session.viewMode)
     writeViewMode(session.viewMode)
     if (session.sourceLabel && session.sourceLabel !== sourceLabel) {

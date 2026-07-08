@@ -3,7 +3,7 @@ import { DEFAULT_PATCH } from '../audio/contracts'
 import { deserializeSession, serializeSession, SESSION_SCHEMA_VERSION } from './session'
 
 describe('serializeSession / deserializeSession', () => {
-  it('round-trips a full session through JSON', () => {
+  it('round-trips legacy motion (via options) into a position lane, and sourceLabel', () => {
     const motion = { samples: [{ tMs: 0, value: 0.2 }, { tMs: 100, value: 0.8 }], durationMs: 100 }
     const session = serializeSession(
       { ...DEFAULT_PATCH, position: 0.7 },
@@ -17,7 +17,7 @@ describe('serializeSession / deserializeSession', () => {
     expect(restored.viewMode).toBe('studio')
     expect(restored.savedAt).toBe(1234)
     expect(restored.patch.position).toBeCloseTo(0.7)
-    expect(restored.motion).toEqual(motion)
+    expect(restored.motionLanes).toEqual([{ target: 'position', data: motion }])
     expect(restored.sourceLabel).toBe('My sample')
   })
 
@@ -30,7 +30,7 @@ describe('serializeSession / deserializeSession', () => {
     expect(session.patch.position).toBe(1)
     expect(session.patch.densityHz).toBe(80)
     expect(session.patch.pitchQuantize).toBe(DEFAULT_PATCH.pitchQuantize)
-    expect(session.motion).toBeUndefined()
+    expect(session.motionLanes).toBeUndefined()
     expect(session.sourceLabel).toBeUndefined()
   })
 
@@ -47,6 +47,24 @@ describe('serializeSession / deserializeSession', () => {
       patch: DEFAULT_PATCH,
       motion: { samples: [{ tMs: 0 }], durationMs: 10 },
     })
-    expect(session.motion).toBeUndefined()
+    expect(session.motionLanes).toBeUndefined()
+  })
+})
+
+describe('session motion lanes (schema v2)', () => {
+  const lane = { target: 'position', data: { samples: [{ tMs: 0, value: 0.5 }], durationMs: 100 } }
+
+  it('serializes motionLanes and stamps schema v2', () => {
+    const session = serializeSession(DEFAULT_PATCH, 'studio', 0, { motionLanes: [lane] as never })
+    expect(session.schemaVersion).toBe(2)
+    expect(session.motionLanes).toEqual([lane])
+  })
+
+  it('migrates a legacy v1 session (single motion) to a position lane', () => {
+    const raw = { schemaVersion: 1, patch: DEFAULT_PATCH, viewMode: 'studio', savedAt: 0,
+      motion: { samples: [{ tMs: 0, value: 0.3 }], durationMs: 80 } }
+    expect(deserializeSession(raw).motionLanes).toEqual([
+      { target: 'position', data: { samples: [{ tMs: 0, value: 0.3 }], durationMs: 80 } },
+    ])
   })
 })
