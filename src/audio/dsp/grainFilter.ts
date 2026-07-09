@@ -26,9 +26,18 @@ export function grainFilterG(cutoffHz: number, sampleRate: number): number {
   return Math.tan(Math.PI * (cutoffHz / sampleRate))
 }
 
+// Simper coefficients for a (pre-clamped) integrator gain g and the fixed
+// resonance GRAIN_FILTER_K. Called once per grain at spawn (never per sample),
+// so the object return is fine — it feeds svfLowpass's a1/a2/a3 arguments.
+export function grainFilterCoefficients(g: number): { a1: number; a2: number; a3: number } {
+  const a1 = 1 / (1 + g * (g + GRAIN_FILTER_K))
+  const a2 = g * a1
+  const a3 = g * a2
+  return { a1, a2, a3 }
+}
+
 // One lowpass sample for `slot`, reading/writing the caller's state arrays in
-// place (zero allocation). a1/a2/a3 are the Simper coefficients derived from
-// g and GRAIN_FILTER_K: a1 = 1/(1 + g*(g + k)), a2 = g*a1, a3 = g*a2.
+// place (zero allocation). a1/a2/a3 come from grainFilterCoefficients(g).
 export function svfLowpass(
   input: number,
   a1: number,
@@ -41,7 +50,15 @@ export function svfLowpass(
   const v3 = input - ic2[slot]
   const v1 = a1 * ic1[slot] + a2 * v3
   const v2 = ic2[slot] + a2 * ic1[slot] + a3 * v3
-  ic1[slot] = 2 * v1 - ic1[slot]
-  ic2[slot] = 2 * v2 - ic2[slot]
+  let s1 = 2 * v1 - ic1[slot]
+  let s2 = 2 * v2 - ic2[slot]
+  // Denormal flush: silent source lets the integrators decay into subnormal
+  // doubles, which run 10-100x slower on the audio thread (JS can't set
+  // FTZ/DAZ). Snap to zero below the audible floor. Only runs on the engaged
+  // path — the Off branch never calls this, so its bypass stays byte-identical.
+  if (s1 < 1e-20 && s1 > -1e-20) s1 = 0
+  if (s2 < 1e-20 && s2 > -1e-20) s2 = 0
+  ic1[slot] = s1
+  ic2[slot] = s2
   return v2
 }

@@ -258,9 +258,21 @@ export const PATCH_RANGES = Object.freeze({
   subTune: [30, 120] as const,
   bpm: [30, 300] as const,
   shatterSwing: [0, 0.6] as const,
+  // The MAX of this range doubles as the persisted "Off" sentinel: a stored
+  // grainFilterHz at (or above) 8000 means the per-grain filter is bypassed.
+  // WARNING: widening this range REQUIRES a sanitize-time migration of stored
+  // values at the old max — otherwise every saved "Off" preset silently becomes
+  // an engaged 8 kHz resonant filter. Test the sentinel via isGrainFilterOff().
   grainFilterHz: [200, 8000] as const,
   grainFilterSpread: [0, 3] as const,
 })
+
+// Single source of truth for the grain-filter "Off" convention: the dial at its
+// max means bypass. Re-encoding this as a bare `>= 8000` in the engine, UI, or
+// tests is what makes a future range change silently reinterpret saved presets.
+export function isGrainFilterOff(hz: number): boolean {
+  return hz >= PATCH_RANGES.grainFilterHz[1]
+}
 
 // LFO field ranges are kept out of PATCH_RANGES because they are per-LFO, not
 // top-level patch fields (tooling treats every PATCH_RANGES key as a patch key).

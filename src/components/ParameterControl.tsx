@@ -20,11 +20,14 @@ interface ParameterControlProps {
 export function ParameterControl({
   label, value, minimum, maximum, step, unit, scale = 'linear', decimals = 1, disabled = false, maxLabel, onChange,
 }: ParameterControlProps) {
+  // Sentinel top (e.g. the grain filter's "Off"): the displayed value and the
+  // aria value both switch to maxLabel, so share the one condition.
+  const atMax = maxLabel !== undefined && value >= maximum
   return (
     <label className={`parameter-control${disabled ? ' parameter-control--locked' : ''}`}>
       <span className="parameter-label">{label}</span>
       <span className="parameter-value">
-        {maxLabel !== undefined && value >= maximum
+        {atMax
           ? maxLabel
           : <>{value.toFixed(decimals)} <span>{unit}</span></>}
       </span>
@@ -34,7 +37,7 @@ export function ParameterControl({
         max={SLIDER_STEPS}
         value={toSlider(value, { minimum, maximum, scale })}
         aria-label={label}
-        aria-valuetext={maxLabel !== undefined && value >= maximum
+        aria-valuetext={atMax
           ? maxLabel
           : `${value.toFixed(decimals)} ${unit}`}
         disabled={disabled}

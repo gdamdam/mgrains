@@ -1,6 +1,7 @@
 import {
   clamp,
   DEFAULT_PATCH,
+  isGrainFilterOff,
   LFO_COUNT,
   PATCH_RANGES,
   sanitizePatch,
@@ -13,7 +14,7 @@ import {
 import { DIVISION_BEATS } from './shatterTiming'
 import { bitcrush, OnePole, softClipDrive } from './effects'
 import { Formant } from './formant'
-import { clampGrainCutoff, GRAIN_FILTER_K, grainFilterG, svfLowpass } from './grainFilter'
+import { clampGrainCutoff, grainFilterCoefficients, grainFilterG, svfLowpass } from './grainFilter'
 import { Reverb } from './reverb'
 import { Comb } from './comb'
 import { Limiter } from './limiter'
@@ -192,14 +193,14 @@ export class GranularCore {
   // gates the render-loop path per grain, so a patch flipped to Off mid-sound
   // lets live grains keep their color (clickless) while new spawns skip the
   // filter — and Off never touches the RNG (exact v1.7 bypass).
-  // a1/a2/a3 are the Simper coefficients derived from filterG and
-  // GRAIN_FILTER_K (a1 = 1/(1 + g*(g + k)), a2 = g*a1, a3 = g*a2). Hoisted to
-  // spawn time (perf: Task 4 bench) since they depend only on the slot's fixed
-  // g — computing them per-sample-per-grain was the dominant marginal cost of
-  // the filter. filterG is kept alongside (unused by the render loop) so
-  // grainFilterCutoffHz can still recover fc exactly for tests/observability.
+  // a1/a2/a3 are the Simper coefficients from grainFilterCoefficients(g).
+  // Hoisted to spawn time (perf: Task 4 bench) since they depend only on the
+  // slot's fixed g — computing them per-sample-per-grain was the dominant
+  // marginal cost of the filter. filterCutoffHz records the drawn cutoff (Hz)
+  // for each slot (unused by the render loop) so grainFilterCutoffHz can report
+  // it exactly for tests/observability.
   private readonly filterOn: Uint8Array
-  private readonly filterG: Float64Array
+  private readonly filterCutoffHz: Float64Array
   private readonly filterA1: Float64Array
   private readonly filterA2: Float64Array
   private readonly filterA3: Float64Array
@@ -218,6 +219,17 @@ export class GranularCore {
   private readonly tailGainLeft: Float32Array
   private readonly tailGainRight: Float32Array
   private readonly tailRemaining: Float64Array
+  // Tail-side copy of the stolen grain's filter (v1.8.0): captured in
+  // beginStealFade BEFORE spawnGrain reuses the slot, so the fade-out keeps the
+  // lowpassed/resonant color the grain had instead of snapping to raw source.
+  private readonly tailFilterOn: Uint8Array
+  private readonly tailFilterA1: Float64Array
+  private readonly tailFilterA2: Float64Array
+  private readonly tailFilterA3: Float64Array
+  private readonly tailFilterIc1L: Float64Array
+  private readonly tailFilterIc2L: Float64Array
+  private readonly tailFilterIc1R: Float64Array
+  private readonly tailFilterIc2R: Float64Array
   private readonly stealFadeFrames: number
 
   // Frames between spawn events under the CURRENT scheduler (bloom density or
@@ -251,7 +263,7 @@ export class GranularCore {
     this.regionStartFrame = new Float64Array(this.maxGrains)
     this.regionLengthFrames = new Float64Array(this.maxGrains)
     this.filterOn = new Uint8Array(this.maxGrains)
-    this.filterG = new Float64Array(this.maxGrains)
+    this.filterCutoffHz = new Float64Array(this.maxGrains)
     this.filterA1 = new Float64Array(this.maxGrains)
     this.filterA2 = new Float64Array(this.maxGrains)
     this.filterA3 = new Float64Array(this.maxGrains)
@@ -267,6 +279,14 @@ export class GranularCore {
     this.tailGainLeft = new Float32Array(STEAL_TAIL_COUNT)
     this.tailGainRight = new Float32Array(STEAL_TAIL_COUNT)
     this.tailRemaining = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailFilterOn = new Uint8Array(STEAL_TAIL_COUNT)
+    this.tailFilterA1 = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailFilterA2 = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailFilterA3 = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailFilterIc1L = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailFilterIc2L = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailFilterIc1R = new Float64Array(STEAL_TAIL_COUNT)
+    this.tailFilterIc2R = new Float64Array(STEAL_TAIL_COUNT)
     this.stealFadeFrames = Math.max(1, Math.round(sampleRate * STEAL_FADE_SECONDS))
     this.spawnIntervalFrames = this.sampleRate / DEFAULT_PATCH.densityHz
     this.reverb = new Reverb(this.sampleRate)
@@ -306,14 +326,13 @@ export class GranularCore {
   }
 
   /**
-   * Drawn cutoff (Hz) of the grain in `slot`, recovered exactly from the slot
-   * coefficient (fc = atan(g) * sr / pi); 0 when the slot is inactive or
+   * Drawn cutoff (Hz) of the grain in `slot`; 0 when the slot is inactive or
    * unfiltered. Observability for tests — not used by the render path.
    */
   grainFilterCutoffHz(slot: number): number {
     if (slot < 0 || slot >= this.maxGrains) return 0
     if (this.active[slot] === 0 || this.filterOn[slot] === 0) return 0
-    return (Math.atan(this.filterG[slot]) * this.sampleRate) / Math.PI
+    return this.filterCutoffHz[slot]
   }
 
   get currentMode(): GrainMode {
@@ -429,11 +448,10 @@ export class GranularCore {
     this.reset()
   }
 
-  reset(seed?: number): void {
-    if (this.pendingPatch) {
-      this.applyPatch(this.pendingPatch, true)
-      this.pendingPatch = null
-    }
+  // Silence and reset every grain, steal-fade tail and their filter state.
+  // Shared by reset() and the mode-switch pending-patch flush so the two stay
+  // in lockstep as filter arrays are added.
+  private clearGrainPool(): void {
     this.active.fill(0)
     this.age.fill(0)
     this.tailRemaining.fill(0)
@@ -442,6 +460,19 @@ export class GranularCore {
     this.filterIc2L.fill(0)
     this.filterIc1R.fill(0)
     this.filterIc2R.fill(0)
+    this.tailFilterOn.fill(0)
+    this.tailFilterIc1L.fill(0)
+    this.tailFilterIc2L.fill(0)
+    this.tailFilterIc1R.fill(0)
+    this.tailFilterIc2R.fill(0)
+  }
+
+  reset(seed?: number): void {
+    if (this.pendingPatch) {
+      this.applyPatch(this.pendingPatch, true)
+      this.pendingPatch = null
+    }
+    this.clearGrainPool()
     this.frame = 0
     this.nextGrainFrame = 0
     this.shatterStepIndex = 0
@@ -684,20 +715,29 @@ export class GranularCore {
           this.tailRegionStart[tail],
           this.tailRegionLength[tail],
         )
-        left += this.readLinear(
+        let tailLeft = this.readLinear(
           this.sourceLeft,
           tailFrame,
           this.tailOffset[tail],
           this.tailRegionStart[tail],
           this.tailRegionLength[tail],
-        ) * this.tailGainLeft[tail] * ramp
-        right += this.readLinear(
+        )
+        let tailRight = this.readLinear(
           this.sourceRight,
           tailFrame,
           this.tailOffset[tail],
           this.tailRegionStart[tail],
           this.tailRegionLength[tail],
-        ) * this.tailGainRight[tail] * ramp
+        )
+        if (this.tailFilterOn[tail] === 1) {
+          const a1 = this.tailFilterA1[tail]
+          const a2 = this.tailFilterA2[tail]
+          const a3 = this.tailFilterA3[tail]
+          tailLeft = svfLowpass(tailLeft, a1, a2, a3, this.tailFilterIc1L, this.tailFilterIc2L, tail)
+          tailRight = svfLowpass(tailRight, a1, a2, a3, this.tailFilterIc1R, this.tailFilterIc2R, tail)
+        }
+        left += tailLeft * this.tailGainLeft[tail] * ramp
+        right += tailRight * this.tailGainRight[tail] * ramp
 
         this.tailPosition[tail] += this.tailStep[tail]
         this.tailRemaining[tail] = remaining - 1
@@ -977,7 +1017,7 @@ export class GranularCore {
     // so the band is musically symmetric). Off (dial at max) branches BEFORE
     // the RNG: no draw, no state write — the stream and output stay identical
     // to a filterless v1.7 render.
-    if (this.patch.grainFilterHz >= PATCH_RANGES.grainFilterHz[1]) {
+    if (isGrainFilterOff(this.patch.grainFilterHz)) {
       this.filterOn[slot] = 0
     } else {
       const octaves = this.rng.nextBipolar() * this.patch.grainFilterSpread
@@ -986,12 +1026,12 @@ export class GranularCore {
         this.sampleRate,
       )
       this.filterOn[slot] = 1
+      this.filterCutoffHz[slot] = cutoffHz
       const g = grainFilterG(cutoffHz, this.sampleRate)
-      this.filterG[slot] = g
-      const a1 = 1 / (1 + g * (g + GRAIN_FILTER_K))
+      const { a1, a2, a3 } = grainFilterCoefficients(g)
       this.filterA1[slot] = a1
-      this.filterA2[slot] = g * a1
-      this.filterA3[slot] = g * this.filterA2[slot]
+      this.filterA2[slot] = a2
+      this.filterA3[slot] = a3
       this.filterIc1L[slot] = 0
       this.filterIc2L[slot] = 0
       this.filterIc1R[slot] = 0
@@ -1052,6 +1092,19 @@ export class GranularCore {
     this.tailRegionLength[tail] = this.regionLengthFrames[slot]
     this.tailGainLeft[tail] = this.gainLeft[slot] * envelope
     this.tailGainRight[tail] = this.gainRight[slot] * envelope
+    // Carry the stolen grain's filter into the tail (runs before spawnGrain
+    // overwrites the slot's coefficients/integrators) so the fade keeps its
+    // color instead of jumping to raw source.
+    this.tailFilterOn[tail] = this.filterOn[slot]
+    if (this.filterOn[slot] === 1) {
+      this.tailFilterA1[tail] = this.filterA1[slot]
+      this.tailFilterA2[tail] = this.filterA2[slot]
+      this.tailFilterA3[tail] = this.filterA3[slot]
+      this.tailFilterIc1L[tail] = this.filterIc1L[slot]
+      this.tailFilterIc2L[tail] = this.filterIc2L[slot]
+      this.tailFilterIc1R[tail] = this.filterIc1R[slot]
+      this.tailFilterIc2R[tail] = this.filterIc2R[slot]
+    }
     this.tailRemaining[tail] = this.stealFadeFrames
   }
 
@@ -1132,14 +1185,7 @@ export class GranularCore {
       if (this.modeTransitionGain <= this.modeTransitionStep * 0.5) {
         this.modeTransitionGain = 0
         if (this.pendingPatch) {
-          this.active.fill(0)
-          this.age.fill(0)
-          this.tailRemaining.fill(0)
-          this.filterOn.fill(0)
-          this.filterIc1L.fill(0)
-          this.filterIc2L.fill(0)
-          this.filterIc1R.fill(0)
-          this.filterIc2R.fill(0)
+          this.clearGrainPool()
           this.applyPatch(this.pendingPatch, true, absoluteFrame)
           this.pendingPatch = null
         }

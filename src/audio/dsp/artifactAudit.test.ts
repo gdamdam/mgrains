@@ -312,4 +312,22 @@ describe('artifact audit — per-grain filter engaged', () => {
       expect(stats.peak).toBeLessThanOrEqual(1)
     }
   }, 30_000)
+
+  it('voice stealing with the filter engaged fades the filtered tail (no steps)', () => {
+    // Mirrors the filter-Off steal audit above, but with the per-grain filter
+    // engaged. A saturated pool forces every spawn to steal a still-sounding,
+    // lowpassed grain. If the steal tail dropped back to full-bandwidth raw
+    // source (bypassing the filter that was shaping the stolen grain), the
+    // render would step from filtered to raw output on every steal — an audible
+    // click. The tail must carry the stolen grain's filter state.
+    const SR = 48_000
+    const core = makeCore(
+      SR,
+      cleanBloom(SR, { densityHz: 40, grainSizeMs: 500, grainFilterHz: 300, grainFilterSpread: 0 }),
+      sineSource(SR, 220, SR),
+    )
+    core.setActiveNotes([0, 2, 4, 5, 7, 9, 11, 12].map((offset) => ({ offset, velocity: 1 })))
+    const { left } = renderSteady(core, SR)
+    expect(detectDiscontinuities(left)).toHaveLength(0)
+  })
 })

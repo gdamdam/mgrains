@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ADVANCED_PARAM_KEYS,
   DEFAULT_PATCH,
+  isGrainFilterOff,
   PATCH_RANGES,
   resetAdvancedToDefault,
   sanitizePatch,
@@ -173,6 +174,14 @@ describe('per-grain filter schema (v1.8.0)', () => {
     expect(PATCH_RANGES.grainFilterSpread).toEqual([0, 3])
     expect(DEFAULT_PATCH.grainFilterHz).toBe(PATCH_RANGES.grainFilterHz[1]) // Off
     expect(DEFAULT_PATCH.grainFilterSpread).toBe(1)
+  })
+
+  it('isGrainFilterOff is true exactly at/above the range max (the Off sentinel)', () => {
+    expect(isGrainFilterOff(PATCH_RANGES.grainFilterHz[1])).toBe(true)
+    expect(isGrainFilterOff(PATCH_RANGES.grainFilterHz[1] + 1)).toBe(true)
+    expect(isGrainFilterOff(PATCH_RANGES.grainFilterHz[1] - 1)).toBe(false)
+    expect(isGrainFilterOff(DEFAULT_PATCH.grainFilterHz)).toBe(true) // default is Off
+    expect(isGrainFilterOff(800)).toBe(false)
   })
 
   it('fills missing fields (pre-1.8 preset) with the defaults', () => {

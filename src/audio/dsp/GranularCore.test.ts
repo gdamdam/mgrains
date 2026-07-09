@@ -1,7 +1,9 @@
 /// <reference types="node" />
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { DEFAULT_PATCH, type GrainPatch, type ShatterStep } from '../contracts'
+import { DEFAULT_PATCH, PATCH_RANGES, type GrainPatch, type ShatterStep } from '../contracts'
+
+const GRAIN_FILTER_OFF_HZ = PATCH_RANGES.grainFilterHz[1] // range max = Off sentinel
 import { GranularCore } from './GranularCore'
 
 function makeSource(length = 2048): Float32Array {
@@ -831,8 +833,8 @@ describe('GranularCore per-grain filter (v1.8.0)', () => {
     const source = makeSource()
     const a = new GranularCore({ sampleRate: 48_000 })
     const b = new GranularCore({ sampleRate: 48_000 })
-    a.setPatch({ ...DEFAULT_PATCH, grainFilterHz: 8000, grainFilterSpread: 0 })
-    b.setPatch({ ...DEFAULT_PATCH, grainFilterHz: 8000, grainFilterSpread: 3 })
+    a.setPatch({ ...DEFAULT_PATCH, grainFilterHz: GRAIN_FILTER_OFF_HZ, grainFilterSpread: 0 })
+    b.setPatch({ ...DEFAULT_PATCH, grainFilterHz: GRAIN_FILTER_OFF_HZ, grainFilterSpread: 3 })
     a.setSource(source, source)
     b.setSource(source, source)
     expect(render(a)).toEqual(render(b))

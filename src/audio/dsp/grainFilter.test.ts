@@ -4,6 +4,7 @@ import {
   GRAIN_FILTER_K,
   GRAIN_FILTER_MAX_RATIO,
   GRAIN_FILTER_MIN_HZ,
+  grainFilterCoefficients,
   grainFilterG,
   svfLowpass,
 } from './grainFilter'
@@ -13,9 +14,7 @@ const RATES = [44_100, 48_000, 96_000]
 // One-slot SVF harness around the array-based step function.
 function makeSvf(cutoffHz: number, sampleRate: number) {
   const g = grainFilterG(clampGrainCutoff(cutoffHz, sampleRate), sampleRate)
-  const a1 = 1 / (1 + g * (g + GRAIN_FILTER_K))
-  const a2 = g * a1
-  const a3 = g * a2
+  const { a1, a2, a3 } = grainFilterCoefficients(g)
   const ic1 = new Float64Array(1)
   const ic2 = new Float64Array(1)
   return {
@@ -103,5 +102,10 @@ describe('grainFilter (Simper SVF, lowpass)', () => {
     expect(sawNaN).toBe(false)
     expect(Math.abs(last)).toBeLessThan(1e-6) // fully decayed, states finite
     expect(Number.isFinite(svf.ic1[0]) && Number.isFinite(svf.ic2[0])).toBe(true)
+    // Denormal flush: once the integrators decay into subnormal territory they
+    // are snapped to exact zero, so silent grains never leave the FPU grinding
+    // on denormals (JS can't set FTZ/DAZ).
+    expect(svf.ic1[0]).toBe(0)
+    expect(svf.ic2[0]).toBe(0)
   })
 })
