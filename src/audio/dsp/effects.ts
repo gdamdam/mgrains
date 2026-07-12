@@ -3,6 +3,9 @@
 // here is deterministic so it can be unit tested and reused inside a worklet.
 
 const TWO_PI = Math.PI * 2
+// Normalized cutoffs are interpreted relative to this rate (the Opus/mbus
+// standard) so filters sound the same at every actual sample rate.
+const REFERENCE_SAMPLE_RATE = 48_000
 
 /**
  * tanh-style saturation. `drive` 0..1 scales the input into the nonlinear
@@ -78,11 +81,17 @@ export class OnePole {
   private type: FilterType = 'lowpass'
   private state = 0
 
-  setCutoff(normalizedFreq: number, type: FilterType): void {
+  setCutoff(normalizedFreq: number, type: FilterType, sampleRate = REFERENCE_SAMPLE_RATE): void {
     const clamped = Math.min(1, Math.max(0, normalizedFreq))
-    // Standard one-pole smoothing coefficient derived from the normalized
-    // cutoff; bounded in [0, 1] so the recursion can never grow unbounded.
-    const raw = 1 - Math.exp(-TWO_PI * clamped * 0.5)
+    // Standard one-pole smoothing coefficient, bounded in [0, 1] so the
+    // recursion can never grow unbounded. The normalized cutoff maps to an
+    // absolute frequency at the 48 kHz reference (fcHz = normalized · 24000);
+    // dividing by the caller's actual sample rate keeps that Hz target — and
+    // therefore the sound — identical across rates. At 48 kHz (or when the
+    // caller omits sampleRate) this reduces exactly to the original
+    // 1 - exp(-π · normalized).
+    const fcHz = clamped * (REFERENCE_SAMPLE_RATE * 0.5)
+    const raw = 1 - Math.exp((-TWO_PI * fcHz) / sampleRate)
     this.coefficient = Math.min(1, Math.max(0, raw))
     this.type = type
   }

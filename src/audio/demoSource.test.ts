@@ -99,6 +99,15 @@ describe('audio source utilities', () => {
     expect([...peaks]).toEqual([0.5, 1])
     expect(peaks.every(Number.isFinite)).toBe(true)
   })
+
+  it('folds trailing samples that do not fill a whole bucket into the last bucket', () => {
+    // length 5, 2 buckets -> bucketSize 2; sample index 4 used to be dropped.
+    const left = Float32Array.from([0.1, 0.1, 0.1, 0.1, 1])
+    const right = new Float32Array(5)
+    const peaks = createWaveformPeaks(left, right, 2)
+
+    expect(peaks[1]).toBe(1)
+  })
 })
 
 describe('curated source registry (10)', () => {

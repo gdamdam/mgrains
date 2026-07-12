@@ -58,6 +58,18 @@ function repeatDivisionSeconds(patch: GrainPatch): number {
   return divisionToSeconds(DIVISION_BEATS[patch.repeatDivision] / 4, patch.bpm)
 }
 
+// Equal-power pan law for grain spawn (pan in [-1, 1]): gainL² + gainR² is
+// constant at every position, so per-grain loudness no longer depends on where
+// the RNG pans a grain (the old law left centered grains at unity in BOTH
+// channels, +3 dB over hard-panned ones). Exported for tests.
+export function panGainLeft(pan: number): number {
+  return Math.cos((pan + 1) * (Math.PI * 0.25))
+}
+
+export function panGainRight(pan: number): number {
+  return Math.sin((pan + 1) * (Math.PI * 0.25))
+}
+
 type ModeTransitionState = 'steady' | 'fade-out' | 'fade-in'
 
 // A stereo effect that can render allocation-free into a 2-element buffer and
@@ -557,7 +569,7 @@ export class GranularCore {
       value = bitcrush(value, 16 - this.smoothedCrush * 14)
     }
     if (this.smoothedDamp > FX_EPSILON) {
-      filter.setCutoff(1 - this.smoothedDamp * (1 - DAMP_MIN_CUTOFF), 'lowpass')
+      filter.setCutoff(1 - this.smoothedDamp * (1 - DAMP_MIN_CUTOFF), 'lowpass', this.sampleRate)
       value = filter.process(value)
     }
     return value
@@ -833,12 +845,14 @@ export class GranularCore {
       }
     }
 
-    // Position wraps (it's a phase); the rest clamp to their ranges.
+    // Position wraps (it's a phase); the rest clamp to their ranges. Ranges are
+    // indexed explicitly (no spread) — spreading a tuple into arguments
+    // allocates, and this runs per block in the render path.
     this.modPosition = position - Math.floor(position)
-    this.modSpray = clamp(spray, ...PATCH_RANGES.spray)
-    this.modGrainSizeMs = clamp(grainSizeMs, ...PATCH_RANGES.grainSizeMs)
-    this.modDensityHz = clamp(densityHz, ...PATCH_RANGES.densityHz)
-    this.modPitchSpread = clamp(pitchSpread, ...PATCH_RANGES.pitchSpreadSemitones)
+    this.modSpray = clamp(spray, PATCH_RANGES.spray[0], PATCH_RANGES.spray[1])
+    this.modGrainSizeMs = clamp(grainSizeMs, PATCH_RANGES.grainSizeMs[0], PATCH_RANGES.grainSizeMs[1])
+    this.modDensityHz = clamp(densityHz, PATCH_RANGES.densityHz[0], PATCH_RANGES.densityHz[1])
+    this.modPitchSpread = clamp(pitchSpread, PATCH_RANGES.pitchSpreadSemitones[0], PATCH_RANGES.pitchSpreadSemitones[1])
   }
 
   // Evaluate one LFO to a bipolar -1..1 value. Phase is derived from the frame
@@ -1039,7 +1053,7 @@ export class GranularCore {
     }
     // Per-step size scale rides on the live Size dial; clamp to the patch range
     // BEFORE durationFrames so overlap-based gain normalization follows honestly.
-    const scaledGrainSizeMs = clamp(this.modGrainSizeMs * sizeScale, ...PATCH_RANGES.grainSizeMs)
+    const scaledGrainSizeMs = clamp(this.modGrainSizeMs * sizeScale, PATCH_RANGES.grainSizeMs[0], PATCH_RANGES.grainSizeMs[1])
     const durationFrames = Math.max(2, scaledGrainSizeMs * 0.001 * this.sampleRate)
     // Overlap from the actual spawn interval (mode-aware), and √N so an N-note
     // chord sums power-correctly instead of N× hotter than a single note.
@@ -1052,8 +1066,8 @@ export class GranularCore {
     this.step[slot] = direction * 2 ** (pitch / 12)
     this.age[slot] = 0
     this.duration[slot] = durationFrames
-    this.gainLeft[slot] = normalizedGain * (pan > 0 ? Math.cos(pan * Math.PI * 0.5) : 1)
-    this.gainRight[slot] = normalizedGain * (pan < 0 ? Math.cos(-pan * Math.PI * 0.5) : 1)
+    this.gainLeft[slot] = normalizedGain * panGainLeft(pan)
+    this.gainRight[slot] = normalizedGain * panGainRight(pan)
     this.windowCode[slot] = encodeWindow(this.patch.window)
     this.regionStartFrame[slot] = regionStart
     this.regionLengthFrames[slot] = regionLength

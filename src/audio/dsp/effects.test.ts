@@ -133,6 +133,25 @@ describe('OnePole', () => {
     filter.reset()
     expect(filter.process(0)).toBeCloseTo(0)
   })
+
+  // The first sample processed from reset state exposes the smoothing
+  // coefficient directly (state 0 → output = coefficient * input).
+  it('matches the original coefficient at the 48 kHz reference rate', () => {
+    const normalized = 0.3
+    const filter = new OnePole()
+    filter.setCutoff(normalized, 'lowpass', 48_000)
+    expect(filter.process(1)).toBeCloseTo(1 - Math.exp(-Math.PI * normalized), 10)
+  })
+
+  it('targets the same absolute cutoff Hz at other sample rates', () => {
+    const normalized = 0.3
+    // The normalized value maps to fcHz = normalized * 24000 at the 48 kHz
+    // reference; other rates must hit the same Hz, not the same ratio.
+    const fcHz = normalized * 24_000
+    const filter = new OnePole()
+    filter.setCutoff(normalized, 'lowpass', 44_100)
+    expect(filter.process(1)).toBeCloseTo(1 - Math.exp((-2 * Math.PI * fcHz) / 44_100), 10)
+  })
 })
 
 describe('DelayLine', () => {

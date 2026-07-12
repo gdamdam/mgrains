@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { DEFAULT_PATCH, PATCH_RANGES, type GrainPatch, type ShatterStep } from '../contracts'
 
 const GRAIN_FILTER_OFF_HZ = PATCH_RANGES.grainFilterHz[1] // range max = Off sentinel
-import { GranularCore } from './GranularCore'
+import { GranularCore, panGainLeft, panGainRight } from './GranularCore'
 
 function makeSource(length = 2048): Float32Array {
   return Float32Array.from({ length }, (_, index) => Math.sin(index * 0.031))
@@ -156,8 +156,9 @@ describe('GranularCore', () => {
     const right = new Float32Array(4)
     core.process(left, right)
 
-    expect(left[1]).toBeCloseTo(0.03)
-    expect(right[1]).toBeCloseTo(0.03)
+    // Centered grains carry cos(π/4) per channel under the equal-power pan law.
+    expect(left[1]).toBeCloseTo(0.03 * Math.SQRT1_2)
+    expect(right[1]).toBeCloseTo(0.03 * Math.SQRT1_2)
   })
 
   it('smooths output gain changes instead of applying a sample discontinuity', () => {
@@ -220,7 +221,8 @@ describe('GranularCore', () => {
     const left = new Float32Array(1)
     core.process(left, new Float32Array(1))
 
-    expect(left[0]).toBeCloseTo(0.1)
+    // ×√½: centered grains carry cos(π/4) per channel (equal-power pan law).
+    expect(left[0]).toBeCloseTo(0.1 * Math.SQRT1_2)
   })
 
   it('switches Bloom and Shatter through silence in less than 200 ms', () => {
@@ -678,7 +680,8 @@ describe('GranularCore shatter per-step position/size', () => {
     const s = new Float32Array(2); shifted.process(s, new Float32Array(2))
 
     expect(b[1]).toBeCloseTo(0, 3)        // position 0 → reads sample ~0
-    expect(s[1]).toBeCloseTo(0.25, 2)     // +0.25 offset → reads a quarter in
+    // +0.25 offset → reads a quarter in; ×√½ for the equal-power center gain.
+    expect(s[1]).toBeCloseTo(0.25 * Math.SQRT1_2, 2)
   })
 
   it('per-step sizeScale scales grain duration and lowers per-grain gain accordingly', () => {
@@ -804,12 +807,14 @@ describe('GranularCore shatter swing', () => {
 
 describe('GranularCore per-grain filter (v1.8.0)', () => {
   // ---- Exact Off bypass ----------------------------------------------------
-  // Golden digest of a fixed seeded render captured on the UNMODIFIED v1.7 tree
-  // (f267680). grainFilterHz defaults to Off, so this render must stay
-  // byte-identical after the filter lands. If it ever fails on different
-  // hardware (libm variance), regenerate by checking out f267680 and running
-  // this test with the digest console.logged.
-  const V17_GOLDEN_SHA256 = '037dea60588da9c25bcca546277c10ae9b93bf5ce73c8b911e103c3b8ee452a5'
+  // Golden digest of a fixed seeded render. Originally captured on the
+  // unmodified v1.7 tree (f267680); re-captured after the v1.8.2 equal-power
+  // grain pan law, which intentionally rescales grain gains (centered grains
+  // drop ~3 dB), so the bytes differ from v1.7 by design. grainFilterHz
+  // defaults to Off, so this render must stay byte-identical across filter
+  // changes. If it ever fails on different hardware (libm variance),
+  // regenerate on this tree with the digest console.logged.
+  const V17_GOLDEN_SHA256 = '247ff0c9cca8bb76b862b89329e8a83a1fd6ad6cb885f375db39788f9651d639'
 
   function goldenRender(): Buffer {
     const source = makeSource(4096)
@@ -906,5 +911,22 @@ describe('GranularCore per-grain filter (v1.8.0)', () => {
     const before = render(core)
     core.reset()
     expect(render(core)).toEqual(before) // reset => identical replay incl. filter state
+  })
+})
+
+describe('equal-power grain pan', () => {
+  it('preserves power (gainL² + gainR² constant) across the pan range', () => {
+    for (const pan of [-1, -0.5, 0, 0.5, 1]) {
+      const left = panGainLeft(pan)
+      const right = panGainRight(pan)
+      expect(left * left + right * right).toBeCloseTo(1, 6)
+    }
+  })
+
+  it('hard pans put all energy in one channel', () => {
+    expect(panGainLeft(-1)).toBeCloseTo(1, 6)
+    expect(panGainRight(-1)).toBeCloseTo(0, 6)
+    expect(panGainLeft(1)).toBeCloseTo(0, 6)
+    expect(panGainRight(1)).toBeCloseTo(1, 6)
   })
 })

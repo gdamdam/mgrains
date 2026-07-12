@@ -605,7 +605,9 @@ export function createWaveformPeaks(
 
   for (let bucket = 0; bucket < bucketCount; bucket += 1) {
     const start = bucket * bucketSize
-    const end = Math.min(length, start + bucketSize)
+    // floor() leaves up to bucketCount-1 trailing samples; fold them into the
+    // last bucket so the waveform tail is not silently dropped.
+    const end = bucket === bucketCount - 1 ? length : Math.min(length, start + bucketSize)
     let peak = 0
     for (let index = start; index < end; index += 1) {
       peak = Math.max(peak, Math.abs(left[index]), Math.abs(right[index]))
