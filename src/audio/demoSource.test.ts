@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { createDemoSource, createWaveformPeaks, DEMO_SOURCES } from './demoSource'
+import {
+  createDemoSource,
+  createWaveformPeaks,
+  DEMO_SOURCES,
+  GENERATED_SOURCE_ATTRIBUTION,
+  GENERATED_SOURCE_LICENSE,
+  GENERATED_SOURCE_PROVENANCE,
+  getSourceMeta,
+} from './demoSource'
 
 const SAMPLE_RATE = 8_000
 
@@ -25,10 +33,14 @@ function correlation(left: Float32Array, right: Float32Array): number {
 }
 
 describe('audio source utilities', () => {
-  it('exposes ten demo sources with unique ids and labels', () => {
-    expect(DEMO_SOURCES.length).toBe(10)
-    expect(new Set(DEMO_SOURCES.map((source) => source.id)).size).toBe(10)
-    expect(new Set(DEMO_SOURCES.map((source) => source.label)).size).toBe(10)
+  it('exposes eleven demo sources with unique ids and labels', () => {
+    expect(DEMO_SOURCES.length).toBe(11)
+    expect(new Set(DEMO_SOURCES.map((source) => source.id)).size).toBe(11)
+    expect(new Set(DEMO_SOURCES.map((source) => source.label)).size).toBe(11)
+  })
+
+  it('includes the short-impulse source (Dust)', () => {
+    expect(DEMO_SOURCES.some((source) => source.id === 'dust-impulse')).toBe(true)
   })
 
   it('createDemoSource(sr) returns a valid source', () => {
@@ -110,10 +122,10 @@ describe('audio source utilities', () => {
   })
 })
 
-describe('curated source registry (10)', () => {
-  it('has 10 sources with unique ids', () => {
-    expect(DEMO_SOURCES).toHaveLength(10)
-    expect(new Set(DEMO_SOURCES.map((s) => s.id)).size).toBe(10)
+describe('curated source registry (11)', () => {
+  it('has 11 sources with unique ids', () => {
+    expect(DEMO_SOURCES).toHaveLength(11)
+    expect(new Set(DEMO_SOURCES.map((s) => s.id)).size).toBe(11)
   })
 
   it.each(DEMO_SOURCES.map((s) => s.id))('%s: deterministic + valid shape', (id) => {
@@ -136,5 +148,40 @@ describe('curated source registry (10)', () => {
     const peak = Math.max(...source.peaks)
     expect(peak).toBeGreaterThan(0.05)
     expect(peak).toBeLessThanOrEqual(1.0)
+  })
+})
+
+describe('source metadata & provenance', () => {
+  it.each(DEMO_SOURCES.map((s) => s.id))('%s: has a non-empty description and showcase', (id) => {
+    const source = DEMO_SOURCES.find((s) => s.id === id)!
+    expect(source.description.trim().length).toBeGreaterThan(0)
+    expect(source.showcases.trim().length).toBeGreaterThan(0)
+  })
+
+  it('getSourceMeta returns full metadata (name, description, attribution, licence, provenance)', () => {
+    const meta = getSourceMeta('glass-bells')
+    expect(meta).toBeDefined()
+    expect(meta!.label).toBe('Glass bell partials')
+    expect(meta!.description.length).toBeGreaterThan(0)
+    expect(meta!.attribution).toBe(GENERATED_SOURCE_ATTRIBUTION)
+    expect(meta!.license).toBe(GENERATED_SOURCE_LICENSE)
+    expect(meta!.provenance).toBe(GENERATED_SOURCE_PROVENANCE)
+  })
+
+  it('getSourceMeta returns undefined for an unknown id (e.g. a user file)', () => {
+    expect(getSourceMeta('')).toBeUndefined()
+    expect(getSourceMeta('not-a-source')).toBeUndefined()
+  })
+
+  it('declares every source as generated (no bundled/third-party audio, so base-path-safe)', () => {
+    // Provenance is the single source of truth that factory audio is code-made
+    // and therefore needs no asset URL or base-path resolution.
+    expect(GENERATED_SOURCE_LICENSE).toBe('CC0-1.0')
+    expect(GENERATED_SOURCE_PROVENANCE).toMatch(/generated/i)
+    for (const source of DEMO_SOURCES) {
+      // Each source is built by a function, never fetched from a URL/asset.
+      expect(typeof source.build).toBe('function')
+      expect(source).not.toHaveProperty('url')
+    }
   })
 })

@@ -4,9 +4,9 @@
 
 **A granular instrument — bloom any sound into clouds, or shatter it into rhythm.**
 
-[![version](https://img.shields.io/badge/version-1.8.0-6c8f3a)](./package.json)
+[![version](https://img.shields.io/badge/version-1.9.0-6c8f3a)](./package.json)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
-[![tests](https://img.shields.io/badge/tests-481%20passing-2ea043)](#verification)
+[![tests](https://img.shields.io/badge/tests-516%20passing-2ea043)](#verification)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](./tsconfig.json)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)](https://vite.dev)
@@ -28,12 +28,33 @@
 - **Four macros per mode** — Bloom: Cloud · Drift · Warmth · Space. Shatter: Chop · Scatter · Crush · Repeat. Each sweeps a curated parameter group; **Link/Unlink** keeps hand edits authoritative.
 - **11-effect rack** — Drive, Crush, Damp, Tape, Ring, Formant, Comb, Wow, Sub, Space (reverb), Repeat (tempo delay) — each a tile with an amount ring, opening a modal with its parameters and an SVG response curve. A stereo-linked master **limiter** is the final stage.
 - **Per-grain filter** — each grain draws its own resonant lowpass cutoff at spawn from a center ± spread (octaves) band — the classic "every grain its own color" move; the dial's top is **Off** for an exact, bit-identical bypass.
-- **Sources** — ten deterministic demo sounds (random pick), audio-file import, and a 20-second live rolling buffer with **Freeze** and **Clear**.
+- **Sources & scenes** — an authored starting library: **11 deterministic factory sources** (raw material) and **16 factory scenes** (source + full patch + name) selectable from the **Scene** picker, so the first run sounds intentional. Many scenes reuse the same source (e.g. the two "Voice —" scenes are one choir), proving the transformation is the engine, not the sample. Plus audio-file import (always available) and a 20-second live rolling buffer with **Freeze** and **Clear**. See [Factory library](#factory-library).
 - **Performance** — large XY surface, draggable waveform position, a multi-lane **motion recorder** — hit record and every dial or macro you move becomes a looping lane (up to 4 per take), and seeded **Mutate** with bounded **Undo**.
 - **Play it** — polyphonic chromatic playing from the computer keyboard (Ableton layout) and **Web MIDI** (note on/off + velocity), up to 8 voices with oldest-note stealing.
 - **Shatter sequencer** — BPM, straight/dotted/triplet divisions, and a deterministic 16-step lane — gate, probability, pitch offset, reverse, ratchet, plus per-step position offset and size scale — with global swing.
-- **Presets & sync** — 10 curated factory presets plus user presets in IndexedDB (versioned, motion + source-label aware, with a relink prompt); optional **Ableton Link** tempo sync via the companion **mpump** link-bridge; optional **mbus publish** — the "Bus" toggle next to Link offers the master output to the [mbus](https://mbus.mpump.live) patchbay as a source named `mgrains` (tab-to-tab WebRTC via the same bridge, off by default, harmless without it).
+- **Presets & sync** — 16 factory scenes (see above) plus user presets in IndexedDB (versioned, motion + source-label aware, with a relink prompt); optional **Ableton Link** tempo sync via the companion **mpump** link-bridge; optional **mbus publish** — the "Bus" toggle next to Link offers the master output to the [mbus](https://mbus.mpump.live) patchbay as a source named `mgrains` (tab-to-tab WebRTC via the same bridge, off by default, harmless without it).
 - **PWA** — installable manifest and a network-first service worker that precaches the hashed app assets (full offline use after one visit, deploy-safe updates).
+
+## Factory library
+
+mgrains ships an authored starting library with two distinct concepts.
+
+- **A factory source is raw material** — a stereo buffer *before* mgrains touches it (a bell, a choir, a field of clicks). Eleven live in `src/audio/demoSource.ts`, chosen from the **Source** picker.
+- **A factory scene is a source + a full patch + a name.** Loading a scene (the **Scene** picker, or the Scenes list in Studio) switches *both* the source *and* every parameter, so it sounds finished the instant it loads. Sixteen live in `src/audio/factoryScenes.ts`.
+
+The point: **many scenes reuse the same source.** *Voice — Frozen Choir* and *Voice — Glitch Prayer* are the same choir buffer — one frozen into a suspended chord, the other chopped into rhythmic stabs. That contrast is the proof the transformation is mgrains, not the sample. Loading your own file or live input replaces the source and clears the active scene; **"Load file" is available at all times.**
+
+**Two-minute tour** — five scenes that together show the range (~20 s each):
+
+1. **Drone — Glass Cathedral** — smooth, vast, harmonic (Bloom at its most spacious).
+2. **Bell — Spectral Rain** — sparse and shimmering; hear individual grains scatter.
+3. **Percussion — Broken Clock** — rhythmic and swung (Shatter, tempo-synced).
+4. **Field — Static Storm** — noisy, driven, unstable — the destructive end.
+5. **Voice — Frozen Choir**, then **Voice — Glitch Prayer** — the *same* source, two utterly different results.
+
+**Provenance & licensing** — every factory source is generated at runtime by `src/audio/demoSource.ts`; no sampled, recorded, or third-party audio is bundled or fetched, so the download carries zero audio bytes, works fully offline, and needs no asset URL or base-path resolution. The generated audio output is dedicated to the public domain under **CC0-1.0**; the generating *code* is **AGPL-3.0-or-later** (see `LICENSE`). Metadata lives in `demoSource.ts` (`GENERATED_SOURCE_*`, `getSourceMeta(id)`).
+
+**Adding a source or scene (without breaking compatibility)** — append a deterministic `create…(sampleRate): AudioSourceData` generator + a `DEMO_SOURCES` entry (unique `id`, `label`, `description`, `showcases`); **never rename or remove an existing id** (sessions/presets store it and fall back to the first source for unknown ids). For a scene, append a frozen `FACTORY_SCENES` entry (unique `id`, evocative `name`, a real `sourceId`, `mode`, `description`, and a partial `patch` overlaid on `DEFAULT_PATCH`); keep `outputGain ≤ 0.74` and every value inside `PATCH_RANGES` so it round-trips through `sanitizePatch`. Both catalogues are pure data, decoupled from storage — the tests in `demoSource.test.ts` / `factoryScenes.test.ts` enforce these rules.
 
 ## Run locally
 
@@ -94,7 +115,7 @@ App.tsx ── patch/notes ──▶ AudioEngine ── postMessage ──▶ gr
 ## Verification
 
 ```bash
-npm run check   # lint + 481 tests + production build
+npm run check   # lint + 516 tests + production build
 ```
 
 Tests are deterministic and live next to the code (DSP core, effects, contracts, schedulers, RNG, windows, presets, instrument, transport). Note: Vitest runs in a Node environment, so React components and live audio are covered by manual QA below, not unit tests.
@@ -126,7 +147,8 @@ Automated tests cover the DSP and logic; the following must be checked by ear on
 - [ ] Polyphonic chords from the computer keyboard and from a MIDI controller (with velocity)
 - [ ] Live input: built-in mic, physical line-in, USB interface; permission denial; Freeze; Clear; device disconnect; no runaway feedback
 - [ ] Motion record → play → clear behaves and stays in sync
-- [ ] Presets: save, reload, delete; factory presets load; relink prompt on source mismatch
+- [ ] Scenes: pick a scene (source + patch switch together); switch scenes repeatedly; two scenes on one source sound different; load a user file afterward
+- [ ] Presets: save, reload, delete; relink prompt on source mismatch
 - [ ] Ableton Link locks tempo with the mpump bridge + another peer
 - [ ] Mobile Safari / Android: layout usable, audio starts, no thermal/stability surprises
 - [ ] `prefers-reduced-motion`: flying particles replaced by stable markers
@@ -141,10 +163,10 @@ src/
     contracts.ts                canonical GrainPatch, ranges, messages, sanitize
     AudioEngine.ts              AudioContext graph + worklet lifecycle
     granular.worklet.ts         real-time worklet adapter
-    demoSource.ts               ten deterministic demo sources + peaks
+    demoSource.ts               11 deterministic factory sources + peaks + provenance
     macros.ts                   macro → parameter mappings + Link model
     mutate.ts                   seeded deterministic patch variation
-    factoryPresets.ts           10 curated factory presets
+    factoryScenes.ts            16 factory scenes (source + patch)
     dsp/
       GranularCore.ts           grain engine + FX chain + master limiter
       rng.ts, windows.ts        seeded RNG, grain envelopes

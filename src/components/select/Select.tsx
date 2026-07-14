@@ -8,9 +8,12 @@ interface SelectProps<T extends string> {
   options: SelectOption<T>[]
   onChange: (value: T) => void
   id?: string
+  // Shown on the trigger when `value` matches no option (e.g. the Scene picker
+  // before any scene is loaded, or after the patch drifts off a scene).
+  placeholder?: string
 }
 
-export function Select<T extends string>({ label, value, options, onChange, id }: SelectProps<T>) {
+export function Select<T extends string>({ label, value, options, onChange, id, placeholder }: SelectProps<T>) {
   const reactId = useId()
   const listId = `${id ?? reactId}-list`
   const [open, setOpen] = useState(false)
@@ -69,7 +72,7 @@ export function Select<T extends string>({ label, value, options, onChange, id }
         aria-expanded={open} aria-label={label} aria-controls={listId}
         onClick={() => (open ? setOpen(false) : openList())} onKeyDown={onKeyDown}
       >
-        <span>{current?.label ?? ''}</span>
+        <span>{current?.label ?? placeholder ?? ''}</span>
         <span className="select-caret" aria-hidden="true">▾</span>
       </button>
       {open && (

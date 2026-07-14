@@ -2,7 +2,6 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { StudioView } from './StudioView'
 import { DEFAULT_PATCH } from '../../audio/contracts'
-import { FACTORY_PRESETS } from '../../audio/factoryPresets'
 import { initialLinkState } from '../../transport/abletonLink'
 
 const noop = () => {}
@@ -23,7 +22,7 @@ const studioProps = {
   macroValues: {},
   linkedMacros: {},
   presets: [],
-  factory: FACTORY_PRESETS,
+  activeSceneId: '',
   presetName: '',
   linkEnabled: false,
   busEnabled: false,
@@ -63,7 +62,7 @@ const studioProps = {
   onPresetNameChange: noop,
   onSavePreset: noop,
   onLoadPreset: noop,
-  onLoadFactoryPreset: noop,
+  onLoadScene: noop,
   onDeletePreset: noop,
   onSaveSession: noop,
   onLoadSession: noop,
@@ -77,6 +76,8 @@ describe('StudioView', () => {
     expect(html).toContain('fx-bar')          // FX rack present
     expect(html).toContain('advanced-panel')  // advanced panel present
     expect(html).toContain('preset-controls') // presets present
+    expect(html).toContain('Voice — Frozen Choir') // factory scenes listed
+    expect(html).toContain('Load scene…')     // the Scene picker (no scene active)
     expect(html).toContain('Live')            // ◂ Live toggle
   })
 })

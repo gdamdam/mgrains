@@ -8,8 +8,8 @@ import {
   type GrainMode,
   type GrainPatch,
 } from './audio/contracts'
-import { createDemoSource } from './audio/demoSource'
-import { FACTORY_PRESETS } from './audio/factoryPresets'
+import { createDemoSource, DEMO_SOURCES } from './audio/demoSource'
+import { findScene } from './audio/factoryScenes'
 import { applyMacro, MACROS } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
 import { MidiInput } from './instrument/midi'
@@ -78,6 +78,9 @@ export default function App() {
   })
   const [sourceMode, setSourceMode] = useState<AudioSourceMode>('sample')
   const [sourceId, setSourceId] = useState('harmonic-pad')
+  // The factory scene currently loaded, or '' when the patch/source no longer
+  // corresponds to one (user file, live input, manual source pick, user preset).
+  const [activeSceneId, setActiveSceneId] = useState('')
   const [frozen, setFrozen] = useState(false)
   const [liveBufferSeconds, setLiveBufferSeconds] = useState(0)
   // Guards against firing a second getUserMedia() while one is in flight (rapid
@@ -511,6 +514,7 @@ export default function App() {
         // Ignore a stale load that resolved after a newer preset was requested.
         if (!preset || generation !== presetLoadGenerationRef.current) return
         applyPatch(preset.patch)
+        setActiveSceneId('')
         applyPresetMotion(preset.motionLanes)
         if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
           setError(`Preset "${name}" was saved with source "${preset.sourceLabel}". Load that source to match its motion and position.`)
@@ -519,12 +523,28 @@ export default function App() {
       .catch(() => setError('Could not load preset.'))
   }
 
-  const loadFactory = (name: string) => {
-    const preset = FACTORY_PRESETS.find((entry) => entry.name === name)
-    if (!preset) return
-    applyPatch(sanitizePatch({ ...DEFAULT_PATCH, ...preset.patch }))
-    // Factory presets carry no motion, so this stops/clears any existing lanes.
+  // Load a factory scene: switch to its generated source AND apply its patch, so
+  // two scenes on the same source clearly sound different. Works before the
+  // engine starts (patch applies to state; the source is remembered in sourceId
+  // and loaded by startAudio) so first-run selection needs no live engine.
+  const loadScene = (id: string) => {
+    const scene = findScene(id)
+    if (!scene) return
+    applyPatch(sanitizePatch({ ...DEFAULT_PATCH, ...scene.patch }))
+    // Scenes carry no motion, so this stops/clears any existing lanes.
     applyPresetMotion()
+    setActiveSceneId(id)
+    setSourceId(scene.sourceId)
+    const engine = engineRef.current
+    if (engine && engineState === 'running') {
+      const source = createDemoSource(engine.sampleRate ?? 48_000, scene.sourceId)
+      engine.setSource(source)
+      setPeaks(source.peaks)
+      setSourceLabel(source.label)
+      setSampleView({ label: source.label, peaks: source.peaks, sourceId: scene.sourceId })
+      setSourceMode('sample')
+      setFrozen(false)
+    }
   }
 
   const deletePreset = (name: string) => {
@@ -536,6 +556,7 @@ export default function App() {
   // source differs, mirroring loadPreset.
   const applySession = (session: Session) => {
     applyPatch(session.patch)
+    setActiveSceneId('')
     applyPresetMotion(session.motionLanes)
     setViewMode(session.viewMode)
     writeViewMode(session.viewMode)
@@ -713,11 +734,15 @@ export default function App() {
       // loaded file or frozen live capture — so only a fresh start or an explicit
       // reload (already running) generates and loads the demo source.
       if (status === 'resumed') return
-      const source = createDemoSource(engine.sampleRate ?? 48_000)
-      setSourceId('harmonic-pad')
+      // Honour a source/scene chosen before the engine started (default is
+      // harmonic-pad). createDemoSource falls back to the first entry for an
+      // unknown id, so resolve the id we actually loaded to keep state honest.
+      const desiredId = DEMO_SOURCES.some((entry) => entry.id === sourceId) ? sourceId : 'harmonic-pad'
+      const source = createDemoSource(engine.sampleRate ?? 48_000, desiredId)
+      setSourceId(desiredId)
       setPeaks(source.peaks)
       setSourceLabel(source.label)
-      setSampleView({ label: source.label, peaks: source.peaks, sourceId: 'harmonic-pad' })
+      setSampleView({ label: source.label, peaks: source.peaks, sourceId: desiredId })
       setSourceMode('sample')
       setFrozen(false)
       engine.setPatch(patch)
@@ -747,6 +772,7 @@ export default function App() {
       setSampleView({ label: source.label, peaks: source.peaks, sourceId: '' })
       setSourceMode('sample')
       setSourceId('')
+      setActiveSceneId('')
       setFrozen(false)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The audio file could not be loaded.')
@@ -757,6 +783,7 @@ export default function App() {
     engineRef.current?.useSampleSource()
     setSourceMode('sample')
     setSourceId(sampleView.sourceId)
+    setActiveSceneId('')
     setFrozen(false)
     setPeaks(sampleView.peaks)
     setSourceLabel(sampleView.label)
@@ -776,6 +803,7 @@ export default function App() {
       const channels = settings.channelCount ? ` · ${settings.channelCount} ch` : ''
       setSourceMode('live')
       setSourceId('')
+      setActiveSceneId('')
       setFrozen(false)
       setLiveBufferSeconds(0)
       setPeaks(null)
@@ -826,6 +854,7 @@ export default function App() {
     const source = createDemoSource(engine.sampleRate ?? 48_000, id)
     engine.setSource(source)
     setSourceId(id)
+    setActiveSceneId('')
     setPeaks(source.peaks)
     setSourceLabel(source.label)
     setSampleView({ label: source.label, peaks: source.peaks, sourceId: id })
@@ -870,6 +899,7 @@ export default function App() {
           sourceLabel={sourceLabel}
           sourceMode={sourceMode}
           sourceId={sourceId}
+          activeSceneId={activeSceneId}
           frozen={frozen}
           liveBufferSeconds={liveBufferSeconds}
           error={error}
@@ -897,6 +927,7 @@ export default function App() {
           onToggleLink={toggleLink}
           onToggleBus={toggleBus}
           onSelectSource={onSelectSource}
+          onLoadScene={loadScene}
           onWaveformPosition={(position) => updatePatch({ position })}
           onRecordMotion={recordMotion}
           onFinishRecording={finishRecording}
@@ -923,6 +954,7 @@ export default function App() {
         sourceLabel={sourceLabel}
         sourceMode={sourceMode}
         sourceId={sourceId}
+        activeSceneId={activeSceneId}
         frozen={frozen}
         liveBufferSeconds={liveBufferSeconds}
         error={error}
@@ -932,7 +964,6 @@ export default function App() {
         macroValues={macroValues}
         linkedMacros={linkedMacros}
         presets={presets}
-        factory={FACTORY_PRESETS}
         presetName={presetName}
         linkEnabled={linkEnabled}
         busEnabled={busEnabled}
@@ -974,7 +1005,7 @@ export default function App() {
         onPresetNameChange={setPresetName}
         onSavePreset={savePreset}
         onLoadPreset={loadPreset}
-        onLoadFactoryPreset={loadFactory}
+        onLoadScene={loadScene}
         onDeletePreset={deletePreset}
         onSaveSession={saveSessionFile}
         onLoadSession={openSessionFile}

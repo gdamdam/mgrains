@@ -1,18 +1,19 @@
 import type { Preset } from '../storage/presets'
 
-interface FactoryEntry {
+interface SceneEntry {
+  id: string
   name: string
-  sourceHint: string
+  description: string
 }
 
 interface PresetControlsProps {
   presets: Preset[]
-  factory: ReadonlyArray<FactoryEntry>
+  scenes: ReadonlyArray<SceneEntry>
   name: string
   onNameChange: (name: string) => void
   onSave: () => void
   onLoad: (name: string) => void
-  onLoadFactory: (name: string) => void
+  onLoadScene: (id: string) => void
   onDelete: (name: string) => void
 }
 
@@ -20,31 +21,31 @@ interface PresetControlsProps {
 // Presentational: all storage I/O lives in App so this stays easy to reason about.
 export function PresetControls({
   presets,
-  factory,
+  scenes,
   name,
   onNameChange,
   onSave,
   onLoad,
-  onLoadFactory,
+  onLoadScene,
   onDelete,
 }: PresetControlsProps) {
   return (
     <section className="preset-controls">
       <div className="panel-heading">
-        <span>Presets</span>
-        <span>factory + your own</span>
+        <span>Scenes &amp; presets</span>
+        <span>factory scenes + your own</span>
       </div>
-      {factory.length > 0 && (
+      {scenes.length > 0 && (
         <ul className="preset-list preset-factory">
-          {factory.map((preset) => (
-            <li key={preset.name}>
+          {scenes.map((scene) => (
+            <li key={scene.id}>
               <button
                 type="button"
                 className="preset-load"
-                title={`Good for: ${preset.sourceHint}`}
-                onClick={() => onLoadFactory(preset.name)}
+                title={scene.description}
+                onClick={() => onLoadScene(scene.id)}
               >
-                {preset.name}
+                {scene.name}
               </button>
             </li>
           ))}

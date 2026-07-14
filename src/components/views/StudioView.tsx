@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { SHATTER_DIVISIONS, type AudioSourceMode, type GrainMode, type GrainPatch } from '../../audio/contracts'
-import type { FactoryPreset } from '../../audio/factoryPresets'
+import { FACTORY_SCENES } from '../../audio/factoryScenes'
 import type { AudioEngineState } from '../../audio/AudioEngine'
 import type { Preset } from '../../storage/presets'
 import type { LinkState } from '../../transport/abletonLink'
@@ -63,7 +63,7 @@ interface StudioViewProps {
   macroValues: Record<string, number>
   linkedMacros: Record<string, boolean>
   presets: Preset[]
-  factory: ReadonlyArray<FactoryPreset>
+  activeSceneId: string
   presetName: string
   linkEnabled: boolean
   busEnabled: boolean
@@ -103,7 +103,7 @@ interface StudioViewProps {
   onPresetNameChange: (name: string) => void
   onSavePreset: () => void
   onLoadPreset: (name: string) => void
-  onLoadFactoryPreset: (name: string) => void
+  onLoadScene: (id: string) => void
   onDeletePreset: (name: string) => void
   onSaveSession: () => void
   onLoadSession: () => void
@@ -155,6 +155,10 @@ export function StudioView(props: StudioViewProps) {
             format={(v) => `${Math.round(v * 100)}%`}
             onChange={(inputGain) => props.onUpdatePatch({ inputGain })}
           />
+          <Select label="Scene" value={props.activeSceneId}
+            placeholder="Load scene…"
+            options={FACTORY_SCENES.map((s) => ({ value: s.id, label: s.name }))}
+            onChange={props.onLoadScene} />
           <Select label="Source" value={props.sourceId}
             options={DEMO_SOURCES.map((s) => ({ value: s.id, label: s.label }))}
             onChange={props.onSelectSource} />
@@ -450,12 +454,12 @@ export function StudioView(props: StudioViewProps) {
 
       <PresetControls
         presets={props.presets}
-        factory={props.factory}
+        scenes={FACTORY_SCENES}
         name={props.presetName}
         onNameChange={props.onPresetNameChange}
         onSave={props.onSavePreset}
         onLoad={props.onLoadPreset}
-        onLoadFactory={props.onLoadFactoryPreset}
+        onLoadScene={props.onLoadScene}
         onDelete={props.onDeletePreset}
       />
 

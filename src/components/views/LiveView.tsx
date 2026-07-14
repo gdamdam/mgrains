@@ -6,6 +6,7 @@ import { Waveform } from '../Waveform'
 import { XYPad } from '../XYPad'
 import { Dial } from '../dial/Dial'
 import { DEMO_SOURCES } from '../../audio/demoSource'
+import { FACTORY_SCENES } from '../../audio/factoryScenes'
 import type { GrainMode, GrainPatch } from '../../audio/contracts'
 import type { AudioEngineState } from '../../audio/AudioEngine'
 
@@ -24,6 +25,7 @@ interface LiveViewProps {
   sourceLabel: string
   sourceMode: 'sample' | 'live'
   sourceId: string
+  activeSceneId: string
   frozen: boolean
   liveBufferSeconds: number
   error: string | null
@@ -49,6 +51,7 @@ interface LiveViewProps {
   onToggleLink: () => void
   onToggleBus: () => void
   onSelectSource: (id: string) => void
+  onLoadScene: (id: string) => void
   onWaveformPosition: (position: number) => void
   onRecordMotion: () => void
   onFinishRecording: () => void
@@ -90,6 +93,10 @@ export function LiveView(props: LiveViewProps) {
           <button type="button" className={`file-button ${props.busEnabled ? 'is-active' : ''}`}
             title="Publish the master output to the mbus patchbay (needs the local link-bridge; harmless without it)"
             onClick={props.onToggleBus}>{props.busEnabled ? 'Bus on' : 'Bus'}</button>
+          <Select label="Scene" value={props.activeSceneId}
+            placeholder="Load scene…"
+            options={FACTORY_SCENES.map((s) => ({ value: s.id, label: s.name }))}
+            onChange={props.onLoadScene} />
           <Select label="Source" value={props.sourceId}
             options={DEMO_SOURCES.map((s) => ({ value: s.id, label: s.label }))}
             onChange={props.onSelectSource} />

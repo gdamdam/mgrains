@@ -526,6 +526,62 @@ function createSawStack(sampleRate: number): AudioSourceData {
   return finalizeStereo(left, right, 'Detuned saw stack', dur)
 }
 
+// 11. Sparse, very short noise CLICKS scattered across the stereo field — the
+//     "dust and static" transient material. Each hit is a sub-10 ms burst of
+//     lightly low-passed noise with a fast exponential decay and its own random
+//     pan, giving granular clouds crisp, dry onsets to scatter (and a clean
+//     source for the sparse "Dust Constellation" / dense "Machine Gun" scenes).
+function createDustImpulse(sampleRate: number): AudioSourceData {
+  const dur = 4
+  const length = Math.floor(sampleRate * dur)
+  const left = new Float32Array(length)
+  const right = new Float32Array(length)
+  const rng = new XorShift32(0x64_75_73_74) // 'dust'
+
+  interface Click {
+    start: number
+    decay: number
+    pan: number
+    amplitude: number
+  }
+  const hitCount = 90
+  const clicks: Click[] = Array.from({ length: hitCount }, () => ({
+    start: rng.nextFloat() * dur,
+    decay: 500 + rng.nextFloat() * 1500, // fast — click/dust length, not tones
+    pan: rng.nextFloat(),
+    amplitude: 0.5 + rng.nextFloat() * 0.5,
+  }))
+
+  // Independent one-pole low-pass state per channel colours the white bursts
+  // differently L/R so the dust field stays stereo-decorrelated.
+  let lpLeft = 0
+  let lpRight = 0
+  for (let index = 0; index < length; index += 1) {
+    const time = index / sampleRate
+    let gain = 0
+    let panAccum = 0
+    let weight = 0
+    for (const click of clicks) {
+      const since = time - click.start
+      if (since < 0 || since > 0.05) continue
+      const envelope = Math.exp(-since * click.decay) * click.amplitude
+      if (envelope < 0.0005) continue
+      gain += envelope
+      panAccum += click.pan * envelope
+      weight += envelope
+    }
+    const pan = weight > 0 ? panAccum / weight : 0.5
+    const noiseLeft = rng.nextBipolar()
+    const noiseRight = rng.nextBipolar()
+    // Gentle low-pass so hits read as soft "dust" rather than full-band spikes.
+    lpLeft = noiseLeft * 0.6 + lpLeft * 0.4
+    lpRight = noiseRight * 0.6 + lpRight * 0.4
+    left[index] = softClip(lpLeft * gain * (1 - pan) * 2.4)
+    right[index] = softClip(lpRight * gain * pan * 2.4)
+  }
+  return finalizeStereo(left, right, 'Dust impulse field', dur)
+}
+
 // 10. Six partials whose frequencies rise linearly over the buffer, showcasing
 //     position/scan, wow, and bloom processing.
 function createChirpSweep(sampleRate: number): AudioSourceData {
@@ -567,22 +623,64 @@ function createChirpSweep(sampleRate: number): AudioSourceData {
 export interface DemoSource {
   id: string
   label: string
+  // What the raw material IS (the sound before mgrains touches it).
+  description: string
+  // Which mgrains behaviours this material flatters most.
   showcases: string
   build(sampleRate: number): AudioSourceData
 }
 
+// Every factory source is produced by the code in this file — no sampled,
+// recorded, or third-party audio is ever bundled or fetched. These constants are
+// the single source of truth for that provenance so the UI, tests, and docs
+// agree. See docs/FACTORY_LIBRARY.md for the full provenance/licence statement.
+export const GENERATED_SOURCE_ATTRIBUTION =
+  'Synthesized by mgrains — no recording, no third-party audio'
+export const GENERATED_SOURCE_LICENSE = 'CC0-1.0'
+export const GENERATED_SOURCE_PROVENANCE =
+  'Programmatically generated at runtime by src/audio/demoSource.ts. Deterministic (fixed seed per source); contains no sampled, recorded, or third-party audio, so it needs no asset URL or base-path resolution.'
+
 export const DEMO_SOURCES: DemoSource[] = [
-  { id: 'harmonic-pad', label: 'Warm harmonic pad', showcases: 'Bloom clouds · Space · Warmth', build: createHarmonicPad },
-  { id: 'mallet-pulse', label: 'Mallet pulse texture', showcases: 'Shatter rhythm · Repeat · Tape', build: createMalletPulse },
-  { id: 'formant-drone', label: 'Formant vocal drone', showcases: 'Formant · scan-reveals-vowels', build: createFormantDrone },
-  { id: 'glass-bells', label: 'Glass bell partials', showcases: 'Ring · Comb · Pitch spread', build: createGlassBells },
-  { id: 'sub-swell', label: 'Sub bass swell', showcases: 'Sub · Drive · Bloom drone', build: createSubSwell },
-  { id: 'vowel-choir', label: 'Vowel-morph choir', showcases: 'Formant · Bloom stretch · Position', build: createVowelChoir },
-  { id: 'clave-seq', label: 'Clave click sequence', showcases: 'Shatter seq · gate · Repeat', build: createClaveSeq },
-  { id: 'noise-bed', label: 'Evolving noise bed', showcases: 'Spray · Damp · Wow · Crush', build: createNoiseBed },
-  { id: 'saw-stack', label: 'Detuned saw stack', showcases: 'Drive · Comb · Pitch spread', build: createSawStack },
-  { id: 'chirp-sweep', label: 'Spectral chirp sweep', showcases: 'Position/Scan · Wow · Bloom', build: createChirpSweep },
+  { id: 'harmonic-pad', label: 'Warm harmonic pad', description: 'A warm, evolving stack of detuned harmonic partials — a sustained tonal bed.', showcases: 'Bloom clouds · Space · Warmth', build: createHarmonicPad },
+  { id: 'mallet-pulse', label: 'Mallet pulse texture', description: 'Struck wooden-mallet hits on a steady pulse — transient, pitched, percussive.', showcases: 'Shatter rhythm · Repeat · Tape', build: createMalletPulse },
+  { id: 'formant-drone', label: 'Formant vocal drone', description: 'A low bed under band-passed noise whose vowel-like formants slowly sweep.', showcases: 'Formant · scan-reveals-vowels', build: createFormantDrone },
+  { id: 'glass-bells', label: 'Glass bell partials', description: 'Inharmonic bell partials with independent decays — a bright metallic strike.', showcases: 'Ring · Comb · Pitch spread', build: createGlassBells },
+  { id: 'sub-swell', label: 'Sub bass swell', description: 'Deep low partials breathing at a slow rate — a sustained sub-bass tone.', showcases: 'Sub · Drive · Bloom drone', build: createSubSwell },
+  { id: 'vowel-choir', label: 'Vowel-morph choir', description: 'Three detuned harmonic voices morphing through ah–ee–oh vowels — formant-rich and vocal.', showcases: 'Formant · Bloom stretch · Position', build: createVowelChoir },
+  { id: 'clave-seq', label: 'Clave click sequence', description: 'A dry, steady sequence of clave-like clicks — a short percussive loop.', showcases: 'Shatter seq · gate · Repeat', build: createClaveSeq },
+  { id: 'noise-bed', label: 'Evolving noise bed', description: 'Band-passed noise drifting across the spectrum — a complex field-recording-like texture.', showcases: 'Spray · Damp · Wow · Crush', build: createNoiseBed },
+  { id: 'saw-stack', label: 'Detuned saw stack', description: 'Three detuned sawtooth stacks — a bright, harmonically dense tone.', showcases: 'Drive · Comb · Pitch spread', build: createSawStack },
+  { id: 'chirp-sweep', label: 'Spectral chirp sweep', description: 'Six partials rising in pitch across the buffer — a spectral sweep.', showcases: 'Position/Scan · Wow · Bloom', build: createChirpSweep },
+  { id: 'dust-impulse', label: 'Dust impulse field', description: 'Sparse, very short noise clicks scattered in stereo — dust and static transients.', showcases: 'Sparse scatter · Shatter ratchets · Spray', build: createDustImpulse },
 ]
+
+export interface SourceMeta {
+  id: string
+  label: string
+  description: string
+  showcases: string
+  attribution: string
+  license: string
+  provenance: string
+}
+
+// Full metadata for a source id: its own name/description/showcase plus the
+// shared provenance/licence that applies to every generated source. Returns
+// undefined for an unknown id (e.g. a user-loaded file, which has no factory
+// metadata).
+export function getSourceMeta(id: string): SourceMeta | undefined {
+  const source = DEMO_SOURCES.find((entry) => entry.id === id)
+  if (!source) return undefined
+  return {
+    id: source.id,
+    label: source.label,
+    description: source.description,
+    showcases: source.showcases,
+    attribution: GENERATED_SOURCE_ATTRIBUTION,
+    license: GENERATED_SOURCE_LICENSE,
+    provenance: GENERATED_SOURCE_PROVENANCE,
+  }
+}
 
 // Builds the demo source matching `id`, defaulting to the first registry
 // entry when `id` is omitted or unknown. Selection is always explicit and
