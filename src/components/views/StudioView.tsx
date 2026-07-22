@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, type ReactNode } from 'react'
 import { SHATTER_DIVISIONS, type AudioSourceMode, type GrainMode, type GrainPatch } from '../../audio/contracts'
 import { FACTORY_SCENES } from '../../audio/factoryScenes'
 import type { AudioEngineState } from '../../audio/AudioEngine'
@@ -96,6 +96,9 @@ interface StudioViewProps {
   onClearLiveBuffer: () => void
   onWaveformPosition: (position: number) => void
   onRegionChange?: (start: number, end: number) => void
+  // Audio-device + MIDI-mapping panel, composed by App and slotted in here so the
+  // large device/MIDI prop set doesn't have to thread through this view.
+  audioDevicesSlot?: ReactNode
   onRecordMotion: () => void
   onFinishRecording: () => void
   onPlayMotion: () => void
@@ -294,6 +297,7 @@ export function StudioView(props: StudioViewProps) {
         onPositionChange={props.onWaveformPosition}
         onRegionChange={props.onRegionChange}
       />
+      {props.audioDevicesSlot}
 
       <div className="motion-strip">
         <span className="motion-label">Motion · position</span>

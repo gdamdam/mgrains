@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { AudioEngine, type AudioEngineState } from './audio/AudioEngine'
 import {
+  filterAudioInputs,
+  filterAudioOutputs,
+  MIC_DEVICE_HINT_KEY,
+  OUTPUT_DEVICE_HINT_KEY,
+  resolvePreferredDevice,
+  supportsOutputRouting,
+  type DeviceOption,
+} from './audio/devices'
+import { DevicesMidiPanel } from './components/DevicesMidiPanel'
+import {
   DEFAULT_PATCH,
   resetAdvancedToDefault,
   sanitizePatch,
@@ -29,6 +39,24 @@ import {
 import { applyMacro, MACROS } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
 import { MidiInput } from './instrument/midi'
+import {
+  applyLearn,
+  deserializeMidiMappings,
+  matchMapping,
+  MIDI_MAPPINGS_KEY,
+  removeMapping,
+  scaleCcToTarget,
+  serializeMidiMappings,
+  type MidiMapping,
+} from './midi/midiMapping'
+import {
+  createMidiState,
+  reduceMidiEvent,
+  resetState,
+  SUSTAIN_CC,
+  type MidiAction,
+  type MidiRuntimeState,
+} from './midi/midiRuntime'
 import { controlForKey, hasCommandModifier, isEditableTarget, isNoteKey, keyToSemitone } from './instrument/qwertyKeymap'
 import { VoiceAllocator } from './instrument/voiceAllocator'
 import {
@@ -66,6 +94,24 @@ import './styles.css'
 const epochMs = (): number => Date.now()
 
 const INITIAL_DEMO_PEAKS = createDemoSource(8_000).peaks
+
+// Lazy state initializers (localStorage read once, at mount) so we don't call
+// setState synchronously inside an effect. Both tolerate storage being unavailable.
+function loadMidiMappings(): MidiMapping[] {
+  try {
+    return deserializeMidiMappings(localStorage.getItem(MIDI_MAPPINGS_KEY))
+  } catch {
+    return []
+  }
+}
+
+function loadDeviceHint(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? ''
+  } catch {
+    return ''
+  }
+}
 
 interface SampleView {
   label: string
@@ -164,6 +210,9 @@ export default function App() {
   const macroDrivenParamsRef = useRef<Set<string>>(new Set())
   const motionValuesRef = useRef<Record<string, number>>({})
   const setMacroRef = useRef<(id: string, value: number) => void>(() => {})
+  // Latest updatePatch for the MIDI callback (which is declared before updatePatch),
+  // so CC-mapped parameter changes route through the same sanitize/engine path.
+  const updatePatchRef = useRef<(changes: Partial<GrainPatch>) => void>(() => {})
   const [motionLaneCount, setMotionLaneCount] = useState(0)
   const motionRafRef = useRef<number | null>(null)
   const motionT0Ref = useRef(0)
@@ -178,6 +227,23 @@ export default function App() {
   const octaveRef = useRef(0)
   const heldNotesRef = useRef<Map<string, number>>(new Map())
   const voiceAllocatorRef = useRef(new VoiceAllocator(8))
+  // MIDI: pure runtime state (sustain/held/bend, per device+channel) plus the
+  // persisted CC→parameter mappings and the current learn target. Refs feed the
+  // MIDI event callback without re-subscribing; state mirrors drive the UI.
+  const midiStateRef = useRef<MidiRuntimeState>(createMidiState())
+  const [midiMappings, setMidiMappings] = useState<MidiMapping[]>(loadMidiMappings)
+  const midiMappingsRef = useRef<MidiMapping[]>(midiMappings)
+  const midiLearnTargetRef = useRef<string | null>(null)
+  const [midiLearnTarget, setMidiLearnTarget] = useState<string | null>(null)
+  // Audio-device selection. Browser device ids can change between sessions, so the
+  // persisted selection is only a best-effort hint resolved against what's present.
+  const [inputDevices, setInputDevices] = useState<DeviceOption[]>([])
+  const [outputDevices, setOutputDevices] = useState<DeviceOption[]>([])
+  const [selectedInputId, setSelectedInputId] = useState(() => loadDeviceHint(MIC_DEVICE_HINT_KEY))
+  const [selectedOutputId, setSelectedOutputId] = useState(() => loadDeviceHint(OUTPUT_DEVICE_HINT_KEY))
+  const [deviceLabelsAvailable, setDeviceLabelsAvailable] = useState(false)
+  const outputRoutingSupported = typeof AudioContext !== 'undefined'
+    && supportsOutputRouting(AudioContext.prototype)
   const presetStoreRef = useRef(new PresetStore())
   const [presets, setPresets] = useState<Preset[]>([])
   const [presetName, setPresetName] = useState('')
@@ -226,6 +292,73 @@ export default function App() {
       .then((list) => { if (!cancelled) setPresets(list) })
       .catch(() => { /* storage unavailable — presets stay empty */ })
     return () => { cancelled = true }
+  }, [])
+
+  // Persist MIDI mappings (ref + state + localStorage). Stable so the MIDI effect
+  // can depend on it without re-subscribing on every render.
+  const persistMidiMappings = useCallback((next: MidiMapping[]) => {
+    midiMappingsRef.current = next
+    setMidiMappings(next)
+    try { localStorage.setItem(MIDI_MAPPINGS_KEY, serializeMidiMappings(next)) } catch { /* ignore */ }
+  }, [])
+  const startMidiLearn = useCallback((target: string) => {
+    midiLearnTargetRef.current = target
+    setMidiLearnTarget(target)
+  }, [])
+  const cancelMidiLearn = useCallback(() => {
+    midiLearnTargetRef.current = null
+    setMidiLearnTarget(null)
+  }, [])
+  const removeMidiMapping = useCallback((target: string) => {
+    persistMidiMappings(removeMapping(midiMappingsRef.current, target))
+  }, [persistMidiMappings])
+
+  // Enumerate audio devices (labels are empty until the user has granted mic
+  // permission at least once — hence the explicit "enable names" gesture below).
+  const refreshDevices = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      setInputDevices(filterAudioInputs(devices))
+      setOutputDevices(filterAudioOutputs(devices))
+      setDeviceLabelsAvailable(devices.some((device) => device.label !== ''))
+    } catch { /* enumeration unavailable */ }
+  }, [])
+
+  // Reveal device names via an explicit user gesture: open then immediately release
+  // a mic stream (never left running), then re-enumerate now that labels exist.
+  const requestDevicePermission = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach((track) => track.stop())
+      await refreshDevices()
+    } catch {
+      setError('Microphone permission was denied — device names will stay hidden.')
+    }
+  }, [refreshDevices])
+
+  // Enumerate now (device hints are lazy-loaded into state above) and keep the
+  // lists fresh as devices are plugged/unplugged. State is set from the promise
+  // callback (never synchronously in the effect body); listener removed on unmount.
+  useEffect(() => {
+    const media = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined
+    if (!media?.enumerateDevices) return
+    let cancelled = false
+    const load = () => {
+      media.enumerateDevices().then((devices) => {
+        if (cancelled) return
+        setInputDevices(filterAudioInputs(devices))
+        setOutputDevices(filterAudioOutputs(devices))
+        setDeviceLabelsAvailable(devices.some((device) => device.label !== ''))
+      }).catch(() => { /* enumeration unavailable */ })
+    }
+    load()
+    media.addEventListener('devicechange', load)
+    return () => {
+      cancelled = true
+      media.removeEventListener('devicechange', load)
+    }
   }, [])
 
   // Subscribe to the Ableton Link bridge. While Link is enabled and connected it
@@ -350,6 +483,10 @@ export default function App() {
       alloc.reset()
       heldNotesRef.current.clear()
       engineRef.current?.setNotes([])
+      // Also drop any sustain/held MIDI state and recentre bend, so losing the
+      // window mid-bend or with the pedal down can't leave notes stuck or detuned.
+      midiStateRef.current = createMidiState()
+      engineRef.current?.setPitchBend(0)
     }
     const onBlur = () => releaseAllVoices()
     const onVisibilityChange = () => {
@@ -374,35 +511,57 @@ export default function App() {
     const pushNotes = () => engineRef.current?.setNotes(
       alloc.activeVoices().map((voice) => ({ offset: voice.note, velocity: voice.velocity })),
     )
-    // MIDI plays the same allocator voices (8-voice steal); middle C (60) = offset 0,
-    // and note velocity scales each voice's level.
+    // Apply the pure runtime's action descriptors to the allocator + engine. MIDI
+    // plays the same 8-voice allocator (steal); middle C (60) = offset 0, velocity
+    // scales each voice. Owner per device+channel keeps controllers/QWERTY independent.
+    const applyActions = (actions: MidiAction[]) => {
+      let notesChanged = false
+      for (const action of actions) {
+        if (action.type === 'noteOn') {
+          alloc.noteOn(action.note - 60, action.velocity / 127, action.owner)
+          notesChanged = true
+        } else if (action.type === 'noteOff') {
+          if (alloc.noteOff(action.note - 60, action.owner) !== null) notesChanged = true
+        } else if (action.type === 'releaseOwner') {
+          if (alloc.releaseOwnerPrefix(action.ownerPrefix)) notesChanged = true
+        } else if (action.type === 'pitchBend') {
+          engineRef.current?.setPitchBend(action.semitones)
+        }
+      }
+      if (notesChanged) pushNotes()
+    }
     const midi = new MidiInput((event) => {
-      // Owner per device + channel so the same pitch from different controllers,
-      // channels, or the computer keyboard stays independent and releases correctly.
-      if (event.type === 'noteon') {
-        alloc.noteOn(event.note - 60, event.velocity / 127, `midi:${event.device}:${event.channel}`)
-        pushNotes()
-      } else if (event.type === 'noteoff') {
-        if (alloc.noteOff(event.note - 60, `midi:${event.device}:${event.channel}`) !== null) pushNotes()
-      } else if (event.type === 'pitchbend') {
-        // Normalized -1..1 → semitones scaled by the patch's bend range.
-        engineRef.current?.setPitchBend(event.value * pitchBendRangeRef.current)
-      } else if (event.type === 'disconnect') {
-        // Unplugged device: release every voice it still holds so notes don't stick,
-        // and recentre pitch bend so a wheel lost mid-bend can't leave notes transposed.
-        if (alloc.releaseOwnerPrefix(`midi:${event.device}:`)) pushNotes()
-        engineRef.current?.setPitchBend(0)
+      // Notes, sustain (CC64), pitch bend, and disconnect all flow through the pure
+      // runtime, which tracks held/sustained notes and per-device bend.
+      const result = reduceMidiEvent(midiStateRef.current, event, { pitchBendRange: pitchBendRangeRef.current })
+      midiStateRef.current = result.state
+      applyActions(result.actions)
+      // Non-sustain control changes drive learn / parameter mapping.
+      if (event.type === 'cc' && event.controller !== SUSTAIN_CC) {
+        const learnTarget = midiLearnTargetRef.current
+        if (learnTarget) {
+          persistMidiMappings(applyLearn(midiMappingsRef.current, learnTarget, { channel: event.channel, cc: event.controller }))
+          midiLearnTargetRef.current = null
+          setMidiLearnTarget(null)
+          return
+        }
+        const mapping = matchMapping(midiMappingsRef.current, event.channel, event.controller)
+        if (mapping) {
+          const value = scaleCcToTarget(event.value, mapping.target)
+          if (mapping.target.startsWith('macro:')) setMacroRef.current(mapping.target.slice(6), value)
+          else updatePatchRef.current({ [mapping.target]: value } as Partial<GrainPatch>)
+        }
       }
     })
     void midi.enable().catch(() => { /* Web MIDI unavailable or permission denied */ })
     return () => {
       midi.disable()
-      // Release only MIDI-held voices — QWERTY voices belong to their own effect.
-      if (alloc.releaseOwnerPrefix('midi:')) pushNotes()
-      // Recentre pitch bend so teardown can't leave a residual transposition.
-      engineRef.current?.setPitchBend(0)
+      // Teardown: release every MIDI-held voice and recentre pitch bend so nothing
+      // sticks and no residual transposition leaks onto QWERTY or future notes.
+      applyActions(resetState(midiStateRef.current).actions)
+      midiStateRef.current = createMidiState()
     }
-  }, [engineState])
+  }, [engineState, persistMidiMappings])
 
   // QWERTY instrument: while active, the computer keyboard plays the source
   // chromatically and polyphonically. Held note keys accumulate as pitch
@@ -555,6 +714,7 @@ export default function App() {
   // setMacro's identity changes with `patch`; rAF motion playback must call the
   // latest one without re-subscribing, so mirror it into a ref each render.
   useEffect(() => { setMacroRef.current = setMacro }, [setMacro])
+  useEffect(() => { updatePatchRef.current = updatePatch }, [updatePatch])
 
   const toggleMacroLink = useCallback((id: string) => {
     setLinkedMacros((previous) => ({ ...previous, [id]: previous[id] === false }))
@@ -954,7 +1114,7 @@ export default function App() {
     setSourceLabel(sampleView.label)
   }
 
-  const startLiveInput = async () => {
+  const startLiveInput = async (deviceId?: string) => {
     if (liveInputPendingRef.current) return
     liveInputPendingRef.current = true
     setLiveInputPending(true)
@@ -969,7 +1129,10 @@ export default function App() {
       if (!engine || engineState !== 'running') {
         throw new Error('Start audio before enabling live input.')
       }
-      const settings = await engine.enableLiveInput()
+      // Resolve the chosen input against what's actually present (the persisted id
+      // may have vanished); null falls back to the browser default.
+      const resolvedInput = resolvePreferredDevice(deviceId ?? selectedInputId ?? null, inputDevices)
+      const settings = await engine.enableLiveInput(resolvedInput ?? undefined)
       const channels = settings.channelCount ? ` · ${settings.channelCount} ch` : ''
       setSourceMode('live')
       setSourceId('')
@@ -1007,6 +1170,31 @@ export default function App() {
     engineRef.current?.clearLiveBuffer()
     setFrozen(false)
     setLiveBufferSeconds(0)
+  }
+
+  const selectInputDevice = (deviceId: string) => {
+    setSelectedInputId(deviceId)
+    try {
+      if (deviceId) localStorage.setItem(MIC_DEVICE_HINT_KEY, deviceId)
+      else localStorage.removeItem(MIC_DEVICE_HINT_KEY)
+    } catch { /* storage unavailable */ }
+    // Re-open live input on the newly chosen device if it's currently active.
+    if (sourceMode === 'live') void startLiveInput(deviceId || undefined)
+  }
+
+  const selectOutputDevice = (deviceId: string) => {
+    setSelectedOutputId(deviceId)
+    try {
+      if (deviceId) localStorage.setItem(OUTPUT_DEVICE_HINT_KEY, deviceId)
+      else localStorage.removeItem(OUTPUT_DEVICE_HINT_KEY)
+    } catch { /* storage unavailable */ }
+    const engine = engineRef.current
+    if (!engine) return
+    void engine.setOutputDevice(deviceId || null).then((ok) => {
+      // A false result means the device vanished or the browser can't route; the
+      // engine has already fallen back to the default, so just surface a notice.
+      if (!ok) setError('Could not switch the output device; using the default.')
+    })
   }
 
   const changeMode = (mode: GrainMode) => {
@@ -1228,6 +1416,25 @@ export default function App() {
         onClearLiveBuffer={clearLiveBuffer}
         onWaveformPosition={(position) => updatePatch({ position })}
         onRegionChange={(regionStart, regionEnd) => updatePatch({ regionStart, regionEnd })}
+        audioDevicesSlot={
+          <DevicesMidiPanel
+            inputDevices={inputDevices}
+            outputDevices={outputDevices}
+            selectedInputId={selectedInputId}
+            selectedOutputId={selectedOutputId}
+            outputSupported={outputRoutingSupported}
+            deviceLabelsAvailable={deviceLabelsAvailable}
+            onRequestDevicePermission={() => void requestDevicePermission()}
+            onRefreshDevices={() => void refreshDevices()}
+            onSelectInput={selectInputDevice}
+            onSelectOutput={selectOutputDevice}
+            midiMappings={midiMappings}
+            midiLearnTarget={midiLearnTarget}
+            onStartMidiLearn={startMidiLearn}
+            onCancelMidiLearn={cancelMidiLearn}
+            onRemoveMidiMapping={removeMidiMapping}
+          />
+        }
         onRecordMotion={recordMotion}
         onFinishRecording={finishRecording}
         onPlayMotion={playMotion}

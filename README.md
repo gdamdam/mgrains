@@ -4,9 +4,9 @@
 
 **A granular instrument — bloom any sound into clouds, or shatter it into rhythm.**
 
-[![version](https://img.shields.io/badge/version-1.10.0-6c8f3a)](./package.json)
+[![version](https://img.shields.io/badge/version-1.11.0-6c8f3a)](./package.json)
 [![license](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](./LICENSE)
-[![tests](https://img.shields.io/badge/tests-516%20passing-2ea043)](#verification)
+[![tests](https://img.shields.io/badge/tests-654%20passing-2ea043)](#verification)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](./tsconfig.json)
 [![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)](https://vite.dev)
@@ -29,10 +29,12 @@
 - **11-effect rack** — Drive, Crush, Damp, Tape, Ring, Formant, Comb, Wow, Sub, Space (reverb), Repeat (tempo delay) — each a tile with an amount ring, opening a modal with its parameters and an SVG response curve. A stereo-linked master **limiter** is the final stage.
 - **Per-grain filter** — each grain draws its own resonant lowpass cutoff at spawn from a center ± spread (octaves) band — the classic "every grain its own color" move; the dial's top is **Off** for an exact, bit-identical bypass.
 - **Sources & scenes** — an authored starting library: **11 deterministic factory sources** (raw material) and **16 factory scenes** (source + full patch + name) selectable from the **Scene** picker, so the first run sounds intentional. Many scenes reuse the same source (e.g. the two "Voice —" scenes are one choir), proving the transformation is the engine, not the sample. Plus audio-file import (always available) and a 20-second live rolling buffer with **Freeze** and **Clear**. See [Factory library](#factory-library).
-- **Performance** — large XY surface, draggable waveform position, a multi-lane **motion recorder** — hit record and every dial or macro you move becomes a looping lane (up to 4 per take), and seeded **Mutate** with bounded **Undo**.
-- **Play it** — polyphonic chromatic playing from the computer keyboard (Ableton layout) and **Web MIDI** (note on/off + velocity), up to 8 voices with oldest-note stealing.
+- **Performance** — large XY surface, a **zoomable/pannable waveform** with draggable region-start/end handles and position (pointer, touch, pen, and keyboard), a multi-lane **motion recorder** — hit record and every dial or macro you move becomes a looping lane (up to 4 per take), and seeded **Mutate** with bounded **Undo**.
+- **Load a sample your way** — the file picker or **drag-and-drop** an audio file anywhere over the app (one central, safeguarded load path; a file dropped before audio starts is loaded on the Start gesture).
+- **Play it** — polyphonic chromatic playing from the computer keyboard (Ableton layout) and **Web MIDI** (note on/off + velocity), up to 8 voices with oldest-note stealing, plus **MIDI Learn** (map any CC to a parameter or macro, with range/log scaling), **sustain pedal** (CC64), and robust pitch-bend that always recentres on device disconnect or teardown.
+- **Audio devices** — pick the input (microphone/interface) and, where the browser supports output routing (`setSinkId`, Chromium), the output device; selections persist as best-effort hints and refresh on device change.
 - **Shatter sequencer** — BPM, straight/dotted/triplet divisions, and a deterministic 16-step lane — gate, probability, pitch offset, reverse, ratchet, plus per-step position offset and size scale — with global swing.
-- **Presets & sync** — 16 factory scenes (see above) plus user presets in IndexedDB (versioned, motion + source-label aware, with a relink prompt); optional **Ableton Link** tempo sync via the companion **mpump** link-bridge; optional **mbus publish** — the "Bus" toggle next to Link offers the master output to the [mbus](https://mbus.mpump.live) patchbay as a source named `mgrains` (tab-to-tab WebRTC via the same bridge, off by default, harmless without it).
+- **Presets & sync** — 16 factory scenes (see above) plus user presets in IndexedDB (versioned, motion-aware, and **source/scene-identity aware**: a factory source or scene restores exactly by its stable id, while imported files and live input keep a `sourceLabel` relink prompt and never masquerade as factory sources); optional **Ableton Link** tempo sync via the companion **mpump** link-bridge; optional **mbus publish** — the "Bus" toggle next to Link offers the master output to the [mbus](https://mbus.mpump.live) patchbay as a source named `mgrains` (tab-to-tab WebRTC via the same bridge, off by default, harmless without it).
 - **PWA** — installable manifest and a network-first service worker that precaches the hashed app assets (full offline use after one visit, deploy-safe updates).
 
 ## Factory library
@@ -115,7 +117,7 @@ App.tsx ── patch/notes ──▶ AudioEngine ── postMessage ──▶ gr
 ## Verification
 
 ```bash
-npm run check   # lint + 516 tests + production build
+npm run check   # lint + 654 tests + production build
 ```
 
 Tests are deterministic and live next to the code (DSP core, effects, contracts, schedulers, RNG, windows, presets, instrument, transport). Note: Vitest runs in a Node environment, so React components and live audio are covered by manual QA below, not unit tests.
@@ -132,27 +134,39 @@ Tests are deterministic and live next to the code (DSP core, effects, contracts,
 - The engine uses the real `AudioContext.sampleRate` and never assumes 44.1/48 kHz.
 - Headless/automated browsers may expose no audio device; the app times out with an actionable error instead of hanging.
 - A PWA install does **not** provide background or lock-screen audio.
+- **Output-device selection** uses `AudioContext.setSinkId`, currently **Chromium-only**. In Safari/Firefox the output picker is replaced by a note to choose the output in system/browser settings; the master limiter and mbus master tap are unaffected. Input-device selection works wherever `enumerateDevices`/`getUserMedia` do; persisted device ids are best-effort hints (browsers may rotate them) resolved against what's actually present, falling back to the default.
+- MIDI (notes, CC learn, sustain, pitch bend) requires **Web MIDI** (Chromium; not Safari/Firefox); access is requested only after the explicit Start-audio gesture. QWERTY playing is always available.
 - Ableton Link sync requires the companion **mpump link-bridge** running locally (`ws://localhost:19876`); without it the Link panel simply shows "searching".
 - **mbus publish** rides the same link-bridge; without it the "Bus" toggle just keeps retrying quietly and nothing is published. Audio flows tab-to-tab over WebRTC and never leaves the machine.
 
 ## Physical-device QA checklist
 
-Automated tests cover the DSP and logic; the following must be checked by ear on real hardware before a release:
+Automated tests cover the DSP and logic (654 Node tests); React components and live audio/MIDI/devices **cannot** be exercised in the Node test environment, so the following must be checked on real hardware before a release. No physical-device verification is claimed here — this is the manual matrix to run.
 
-- [ ] Audible stereo playback in Chrome, Safari, and Firefox (headphones/controlled output)
-- [ ] All four direct controls (Grain Size, Density, Position, Spray) respond cleanly
-- [ ] Bloom ↔ Shatter switch is click-free; both modes are audibly distinct
-- [ ] Each macro (Cloud/Drift/Warmth/Space, Chop/Scatter/Crush/Repeat) sweeps musically
-- [ ] Each FX (Drive…Repeat) engages without artefacts; master limiter holds the ceiling
-- [ ] Polyphonic chords from the computer keyboard and from a MIDI controller (with velocity)
-- [ ] Live input: built-in mic, physical line-in, USB interface; permission denial; Freeze; Clear; device disconnect; no runaway feedback
-- [ ] Motion record → play → clear behaves and stays in sync
-- [ ] Scenes: pick a scene (source + patch switch together); switch scenes repeatedly; two scenes on one source sound different; load a user file afterward
-- [ ] Presets: save, reload, delete; relink prompt on source mismatch
+**Browser × platform matrix** — run the core smoke (audio starts, stereo playback, Bloom↔Shatter click-free, one macro, one FX, limiter holds) on each cell you support:
+
+| | macOS | Windows | iOS | Android |
+|---|---|---|---|---|
+| Chrome | ☐ | ☐ | — | ☐ |
+| Safari | ☐ | — | ☐ | — |
+| Firefox | ☐ | ☐ | — | ☐ |
+
+Then, per feature:
+
+- [ ] Direct controls (Grain Size, Density, Position, Spray) respond cleanly; macros sweep musically; each FX (Drive…Repeat) engages without artefacts
+- [ ] Bloom ↔ Shatter switch is click-free; both modes audibly distinct
+- [ ] **Source/scene/preset transitions are click-free** (fade-through-silence); rapid switching leaves the newest choice loaded, no residual tails
+- [ ] **Audio input selection**: built-in mic, USB audio interface, Bluetooth headset; switch device while live; **unplug/reconnect** the selected device (falls back to default, no leak); **permission denial** shows an actionable message
+- [ ] **Audio output selection** (Chromium): switch output while sounding; unplug the selected output (falls back to default); Safari/Firefox show the system-settings note instead of a picker
+- [ ] **MIDI**: polyphonic chords from the computer keyboard and from a controller (with velocity); **two controllers at once** stay independent; **sustain pedal** (CC64) holds/releases correctly; **pitch bend** bends and always recentres on disconnect / MIDI-off / tab hidden; **MIDI Learn** maps a CC to a parameter and to a macro, persists across reload, and removes cleanly; unmapped CCs are harmless
+- [ ] **Drag-and-drop**: drop a single audio file (loads); drop a folder / multiple files / a non-audio file (actionable rejection, no navigation); overlay appears and never sticks; drop **before** Start audio (loads on Start); rapid drops load only the newest; drop racing the file picker / source / scene / preset / live input resolves to the newest
+- [ ] **Waveform**: zoom, pan, drag region-start/end handles, and keyboard controls on mouse, touch, and pen; region stays valid; markers track at the telemetry rate without jank
+- [ ] Live buffer: Freeze; Clear; device disconnect; no runaway feedback
+- [ ] Motion record → play → clear stays in sync
+- [ ] Scenes: pick a scene (source + patch switch together); two scenes on one source sound different; load a user file afterward. Presets/sessions: save, reload, delete; **factory source/scene restores exactly**; imported/live shows a relink prompt
 - [ ] Ableton Link locks tempo with the mpump bridge + another peer
-- [ ] Mobile Safari / Android: layout usable, audio starts, no thermal/stability surprises
 - [ ] `prefers-reduced-motion`: flying particles replaced by stable markers
-- [ ] Offline: loads after first successful visit (service worker)
+- [ ] **PWA**: install on desktop + mobile; correct icon (incl. maskable on Android, apple-touch on iOS); loads offline after first visit; a redeploy updates the shell (network-first) without serving stale assets
 
 ## Repository map
 
@@ -190,7 +204,9 @@ public/                         manifest, service worker, app icon, CNAME
 
 ## Progressive Web App
 
-`public/manifest.webmanifest` + `public/sw.js` make `mgrains` installable. The service worker is **network-first for navigations** (so a deploy never serves a stale shell) and cache-first for hashed assets. At install it precaches the shell plus the content-hashed build assets listed in a generated `precache-manifest.json` (emitted by a small Vite plugin), so the full app — including the audio worklet — works offline after a single successful load.
+`public/manifest.webmanifest` + `public/sw.js` make `mgrains` installable. The service worker is **network-first for navigations** (so a deploy never serves a stale shell) and cache-first for hashed assets. At install it precaches the shell (including the icons) plus the content-hashed build assets listed in a generated `precache-manifest.json` (emitted by a small Vite plugin), so the full app — including the audio worklet — works offline after a single successful load. On activate it deletes any cache not in the current version set, so obsolete unhashed assets don't accumulate.
+
+**Icons** are generated from `public/mgrains-mark.svg` by `scripts/generate-icons.mjs` (build-time only, via the `sharp` devDependency) into `public/icons/`: `icon-192.png`, `icon-512.png` (purpose `any`), `maskable-512.png` (mark inside an ~80% safe zone for Android maskable masks), and `apple-touch-icon-180.png` (opaque, for iOS). Regenerate and commit `public/icons/` after changing the mark: `npm run icons`.
 
 ## Deployment
 
