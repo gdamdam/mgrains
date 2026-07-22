@@ -53,6 +53,7 @@ interface LiveViewProps {
   onSelectSource: (id: string) => void
   onLoadScene: (id: string) => void
   onWaveformPosition: (position: number) => void
+  onRegionChange?: (start: number, end: number) => void
   onRecordMotion: () => void
   onFinishRecording: () => void
   onPlayMotion: () => void
@@ -124,6 +125,7 @@ export function LiveView(props: LiveViewProps) {
           ? `${props.frozen ? 'Frozen' : 'Capturing'} · ${props.liveBufferSeconds.toFixed(1)} of 20.0 seconds`
           : 'Choose a source to begin'}
         onPositionChange={props.onWaveformPosition}
+        onRegionChange={props.onRegionChange}
       />
 
       <div className="live-perform">

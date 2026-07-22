@@ -108,8 +108,8 @@ describe('serializePreset / deserializePreset', () => {
     expect(deserializePreset({ name: 99, patch: DEFAULT_PATCH }).name.length).toBeGreaterThan(0)
   })
 
-  it('stamps schema version 3', () => {
-    expect(PRESET_SCHEMA_VERSION).toBe(3)
+  it('stamps schema version 4', () => {
+    expect(PRESET_SCHEMA_VERSION).toBe(4)
   })
 
   it('omits motionLanes and sourceLabel when no options are supplied', () => {
@@ -133,7 +133,7 @@ describe('serializePreset / deserializePreset', () => {
     })
     const roundTripped = deserializePreset(JSON.parse(JSON.stringify(preset)))
 
-    expect(preset.schemaVersion).toBe(3)
+    expect(preset.schemaVersion).toBe(PRESET_SCHEMA_VERSION)
     expect(roundTripped).toEqual(preset)
     expect(roundTripped.motionLanes).toEqual(lanes)
     expect(roundTripped.sourceLabel).toBe('kick.wav')
@@ -180,9 +180,9 @@ describe('preset motion lanes (schema v3)', () => {
   const lane = { target: 'position', data: { samples: [{ tMs: 0, value: 0.5 }], durationMs: 100 } }
   const macroLane = { target: 'macro:cloud', data: { samples: [{ tMs: 5, value: 1 }], durationMs: 100 } }
 
-  it('serializes motionLanes and stamps schema v3', () => {
+  it('serializes motionLanes and stamps the current schema version', () => {
     const preset = serializePreset('take', DEFAULT_PATCH, 0, { motionLanes: [lane, macroLane] as never })
-    expect(preset.schemaVersion).toBe(3)
+    expect(preset.schemaVersion).toBe(PRESET_SCHEMA_VERSION)
     expect(preset.motionLanes).toHaveLength(2)
     expect(preset.motionLanes?.[0]).not.toBe(lane) // defensive clone
   })
@@ -208,5 +208,35 @@ describe('preset motion lanes (schema v3)', () => {
       .map((target) => ({ target, data: lane.data }))
     expect(parseMotionLanes(five)).toHaveLength(4)
     expect(parseMotionLanes('not an array')).toBeUndefined()
+  })
+})
+
+describe('preset factory identity (schema v4)', () => {
+  it('round-trips sourceId and sceneId supplied via options', () => {
+    const preset = serializePreset('Bell', DEFAULT_PATCH, 0, {
+      sourceId: 'glass-bells',
+      sceneId: 'bell-spectral-rain',
+    })
+    const roundTripped = deserializePreset(JSON.parse(JSON.stringify(preset)))
+
+    expect(preset.schemaVersion).toBe(PRESET_SCHEMA_VERSION)
+    expect(roundTripped.sourceId).toBe('glass-bells')
+    expect(roundTripped.sceneId).toBe('bell-spectral-rain')
+  })
+
+  it('omits sourceId/sceneId when not supplied and drops non-string values', () => {
+    expect(serializePreset('Plain', DEFAULT_PATCH, 0).sourceId).toBeUndefined()
+    expect(serializePreset('Plain', DEFAULT_PATCH, 0).sceneId).toBeUndefined()
+    expect(deserializePreset({ sourceId: 5, sceneId: [] }).sourceId).toBeUndefined()
+    expect(deserializePreset({ sourceId: 5, sceneId: [] }).sceneId).toBeUndefined()
+  })
+
+  it('deserializes an old v3 preset without the new fields', () => {
+    const raw = { name: 'v3', schemaVersion: 3, createdAt: 0, patch: DEFAULT_PATCH }
+    const preset = deserializePreset(raw)
+    expect(preset.schemaVersion).toBe(3)
+    expect(preset.sourceId).toBeUndefined()
+    expect(preset.sceneId).toBeUndefined()
+    expect(preset.name).toBe('v3')
   })
 })

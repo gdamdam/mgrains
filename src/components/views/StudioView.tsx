@@ -95,6 +95,7 @@ interface StudioViewProps {
   onToggleFreeze: () => void
   onClearLiveBuffer: () => void
   onWaveformPosition: (position: number) => void
+  onRegionChange?: (start: number, end: number) => void
   onRecordMotion: () => void
   onFinishRecording: () => void
   onPlayMotion: () => void
@@ -291,6 +292,7 @@ export function StudioView(props: StudioViewProps) {
           ? `${props.frozen ? 'Frozen' : 'Capturing'} · ${props.liveBufferSeconds.toFixed(1)} of 20.0 seconds`
           : 'Choose a source to begin'}
         onPositionChange={props.onWaveformPosition}
+        onRegionChange={props.onRegionChange}
       />
 
       <div className="motion-strip">

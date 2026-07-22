@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { AudioEngine, type AudioEngineState } from './audio/AudioEngine'
 import {
   DEFAULT_PATCH,
@@ -10,6 +10,22 @@ import {
 } from './audio/contracts'
 import { createDemoSource, DEMO_SOURCES } from './audio/demoSource'
 import { findScene } from './audio/factoryScenes'
+import {
+  KNOWN_SCENE_IDS,
+  KNOWN_SOURCE_IDS,
+  planSourceRestore,
+  relinkMessage,
+  resolveSourceIdentityForSave,
+  shouldClearSceneId,
+} from './storage/sourceIdentity'
+import {
+  dragEnter,
+  dragLeave,
+  isOverlayVisible,
+  transferHasFiles,
+  validateDrop,
+  type DropFileInfo,
+} from './components/dropTarget'
 import { applyMacro, MACROS } from './audio/macros'
 import { mutatePatch } from './audio/mutate'
 import { MidiInput } from './instrument/midi'
@@ -57,6 +73,27 @@ interface SampleView {
   sourceId: string
 }
 
+// Extract dropped entries as validation info plus the concrete File list. Prefer
+// the DataTransferItemList because it exposes directory entries the files list
+// omits (a dropped folder has no File entry); fall back to files when needed.
+function collectDropFiles(dt: DataTransfer): { infos: DropFileInfo[]; files: File[] } {
+  const files = Array.from(dt.files ?? [])
+  const items = dt.items ? Array.from(dt.items).filter((item) => item.kind === 'file') : []
+  if (items.length > 0) {
+    const infos = items.map((item, index): DropFileInfo => {
+      const entry = item.webkitGetAsEntry?.()
+      const file = files[index]
+      return {
+        name: file?.name ?? entry?.name ?? 'file',
+        type: file?.type ?? '',
+        isDirectory: entry?.isDirectory ?? false,
+      }
+    })
+    return { infos, files }
+  }
+  return { infos: files.map((file): DropFileInfo => ({ name: file.name, type: file.type })), files }
+}
+
 const EMPTY_GRAIN_VISUALS = new Float32Array(0)
 
 interface GrainVisualState {
@@ -95,6 +132,16 @@ export default function App() {
   // scene chosen meanwhile updates these so completion honours the newer choice.
   const patchRef = useRef(patch)
   const sourceIdRef = useRef(sourceId)
+  // Latest scene identity for the stable updatePatch callback, so a manual edit
+  // can drop the scene label once the patch no longer truthfully matches it.
+  const activeSceneIdRef = useRef(activeSceneId)
+  // A file dropped (or picked) before audio started: retained and loaded once the
+  // user completes the explicit Start-audio gesture. Never creates a context here.
+  const pendingFileRef = useRef<File | null>(null)
+  // Nested dragenter/leave depth so the drop overlay can't get stuck; state drives
+  // the overlay's visibility only when it actually changes.
+  const dragDepthRef = useRef(0)
+  const [dropActive, setDropActive] = useState(false)
   const [activeGrains, setActiveGrains] = useState(0)
   const [peak, setPeak] = useState(0)
   const [currentShatterStep, setCurrentShatterStep] = useState(0)
@@ -265,7 +312,8 @@ export default function App() {
   useEffect(() => {
     patchRef.current = patch
     sourceIdRef.current = sourceId
-  }, [patch, sourceId])
+    activeSceneIdRef.current = activeSceneId
+  }, [patch, sourceId, activeSceneId])
 
   // Push the note-gate toggle to the engine when it changes (a fresh start also
   // seeds it in startAudio, for the case it was toggled before audio began).
@@ -280,10 +328,11 @@ export default function App() {
     if (pendingSession) return
     const handle = window.setTimeout(() => {
       const motionLanes = hasMotion ? serializeMotionLanes(motionLanesRef.current) : undefined
-      writeLastSession(serializeSession(patch, viewMode, epochMs(), { motionLanes, sourceLabel }))
+      const identity = resolveSourceIdentityForSave({ sourceMode, sourceId, activeSceneId, sourceLabel })
+      writeLastSession(serializeSession(patch, viewMode, epochMs(), { motionLanes, ...identity }))
     }, 500)
     return () => window.clearTimeout(handle)
-  }, [patch, viewMode, sourceLabel, hasMotion, pendingSession])
+  }, [patch, viewMode, sourceLabel, sourceMode, sourceId, activeSceneId, hasMotion, pendingSession])
 
   // Cancel any in-flight motion loop on unmount.
   useEffect(() => () => {
@@ -446,6 +495,17 @@ export default function App() {
       engineRef.current?.setPatch(next)
       return next
     })
+    // A manual edit that moves a scene-pinned field off its value means the patch
+    // is no longer truthfully that factory scene: drop the scene label so it isn't
+    // persisted or displayed dishonestly. Guarded so the common (no-scene) path is
+    // free; sanitize is recomputed only while a scene is active.
+    const sceneId = activeSceneIdRef.current
+    if (sceneId) {
+      const base = findScene(sceneId)?.patch ?? null
+      const current = patchRef.current
+      const next = sanitizePatch({ ...current, ...changes })
+      if (shouldClearSceneId(base, current, next)) setActiveSceneId('')
+    }
   }, [])
 
   // Stable callbacks for the memoized XY pad / shatter sequencer (avoid inline
@@ -504,10 +564,17 @@ export default function App() {
     presetStoreRef.current.list().then(setPresets).catch(() => { /* storage unavailable */ })
   }
 
+  // What source/scene identity to persist for the current state: a known factory
+  // source keeps its stable id, a factory scene its scene id; imported files and
+  // live input persist only a sourceLabel relink hint and never masquerade as
+  // factory sources.
+  const currentSourceIdentity = () =>
+    resolveSourceIdentityForSave({ sourceMode, sourceId, activeSceneId, sourceLabel })
+
   const savePreset = () => {
     const name = presetName.trim() || 'Untitled'
     const motionLanes = hasMotion ? serializeMotionLanes(motionLanesRef.current) : undefined
-    presetStoreRef.current.save(serializePreset(name, patch, epochMs(), { motionLanes, sourceLabel }))
+    presetStoreRef.current.save(serializePreset(name, patch, epochMs(), { motionLanes, ...currentSourceIdentity() }))
       .then(() => {
         setPresetName('')
         refreshPresets()
@@ -529,6 +596,37 @@ export default function App() {
     setMotionState('idle')
   }
 
+  // Restore the source/scene a preset or session was saved with. A known factory
+  // source is regenerated and loaded (or remembered for startAudio when the engine
+  // isn't running yet); a known factory scene restores its source and scene label;
+  // an unknown/removed id or an imported-file/live label falls back to an
+  // actionable relink message. Clears stale errors on a clean restore.
+  const restoreSourceIdentity = (stored: { sourceId?: string; sceneId?: string; sourceLabel?: string }) => {
+    const plan = planSourceRestore(stored, { sourceIds: KNOWN_SOURCE_IDS, sceneIds: KNOWN_SCENE_IDS })
+    // A restore is the newest source intent: supersede any in-flight decode and
+    // drop a pre-start dropped file so neither can clobber it later.
+    fileLoadGenerationRef.current += 1
+    pendingFileRef.current = null
+    if (plan.kind === 'none') { setError(null); return }
+    if (plan.kind === 'relink') { setError(relinkMessage(plan.label)); return }
+    setError(null)
+    const targetSourceId = plan.kind === 'factory-scene'
+      ? (plan.sourceId ?? findScene(plan.sceneId)?.sourceId ?? '')
+      : plan.sourceId
+    setSourceId(targetSourceId)
+    setActiveSceneId(plan.kind === 'factory-scene' ? plan.sceneId : '')
+    setSourceMode('sample')
+    const engine = engineRef.current
+    if (engine && engineState === 'running' && targetSourceId) {
+      const source = createDemoSource(engine.sampleRate ?? 48_000, targetSourceId)
+      engine.setSource(source)
+      setPeaks(source.peaks)
+      setSourceLabel(source.label)
+      setSampleView({ label: source.label, peaks: source.peaks, sourceId: targetSourceId })
+      setFrozen(false)
+    }
+  }
+
   const loadPreset = (name: string) => {
     const generation = (presetLoadGenerationRef.current += 1)
     presetStoreRef.current.load(name)
@@ -536,14 +634,8 @@ export default function App() {
         // Ignore a stale load that resolved after a newer preset was requested.
         if (!preset || generation !== presetLoadGenerationRef.current) return
         applyPatch(preset.patch)
-        setActiveSceneId('')
         applyPresetMotion(preset.motionLanes)
-        if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
-          setError(`Preset "${name}" was saved with source "${preset.sourceLabel}". Load that source to match its motion and position.`)
-        } else {
-          // Matching (or source-less) preset loaded cleanly: drop any stale error.
-          setError(null)
-        }
+        restoreSourceIdentity({ sourceId: preset.sourceId, sceneId: preset.sceneId, sourceLabel: preset.sourceLabel })
       })
       .catch(() => setError('Could not load preset.'))
   }
@@ -556,8 +648,10 @@ export default function App() {
     const scene = findScene(id)
     if (!scene) return
     // Picking a scene supersedes any in-flight file decode (shares the file-load
-    // token) so a slow decode can't later clobber this source, and clears stale errors.
+    // token) and any pre-start dropped file so neither can later clobber this
+    // source, and clears stale errors.
     fileLoadGenerationRef.current += 1
+    pendingFileRef.current = null
     setError(null)
     applyPatch(sanitizePatch({ ...DEFAULT_PATCH, ...scene.patch }))
     // Scenes carry no motion, so this stops/clears any existing lanes.
@@ -585,16 +679,10 @@ export default function App() {
   // source differs, mirroring loadPreset.
   const applySession = (session: Session) => {
     applyPatch(session.patch)
-    setActiveSceneId('')
     applyPresetMotion(session.motionLanes)
     setViewMode(session.viewMode)
     writeViewMode(session.viewMode)
-    if (session.sourceLabel && session.sourceLabel !== sourceLabel) {
-      setError(`Session was saved with source "${session.sourceLabel}". Load that source to match its motion and position.`)
-    } else {
-      // Matching (or source-less) session restored cleanly: drop any stale error.
-      setError(null)
-    }
+    restoreSourceIdentity({ sourceId: session.sourceId, sceneId: session.sceneId, sourceLabel: session.sourceLabel })
   }
 
   const continueLastSession = () => {
@@ -604,7 +692,7 @@ export default function App() {
 
   const saveSessionFile = () => {
     const motionLanes = hasMotion ? serializeMotionLanes(motionLanesRef.current) : undefined
-    const session = serializeSession(patch, viewMode, epochMs(), { motionLanes, sourceLabel })
+    const session = serializeSession(patch, viewMode, epochMs(), { motionLanes, ...currentSourceIdentity() })
     const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -748,6 +836,37 @@ export default function App() {
     setMotionState('idle')
   }
 
+  // Decode a file on an already-running engine and swap it in. Bumps the shared
+  // file-load token and drops its own result if a newer source intent (another
+  // file, scene, source pick, live input, drop, or restore) superseded it while
+  // decoding — so the newest choice always wins. Shared by the picker and drop.
+  const decodeAndApplyFile = async (engine: AudioEngine, file: File) => {
+    const generation = (fileLoadGenerationRef.current += 1)
+    const source = await engine.decodeFile(file)
+    if (generation !== fileLoadGenerationRef.current) return
+    engine.setSource(source)
+    setPeaks(source.peaks)
+    setSourceLabel(source.label)
+    setSampleView({ label: source.label, peaks: source.peaks, sourceId: '' })
+    setSourceMode('sample')
+    setSourceId('')
+    setActiveSceneId('')
+    setFrozen(false)
+  }
+
+  // Load a file that was dropped/picked before audio started, once the engine is
+  // live. Runs on the fresh-start gesture only — it never creates a context itself.
+  const maybeLoadPendingFile = async (engine: AudioEngine) => {
+    const file = pendingFileRef.current
+    if (!file) return
+    pendingFileRef.current = null
+    try {
+      await decodeAndApplyFile(engine, file)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The audio file could not be loaded.')
+    }
+  }
+
   const startAudio = async () => {
     setError(null)
     try {
@@ -776,8 +895,12 @@ export default function App() {
       const status = await engine.start()
       // Resuming a suspended/interrupted context must keep the current source — a
       // loaded file or frozen live capture — so only a fresh start or an explicit
-      // reload (already running) generates and loads the demo source.
-      if (status === 'resumed') return
+      // reload (already running) generates and loads the demo source. Either way a
+      // file dropped/picked before start is the newest intent and loads now.
+      if (status === 'resumed') {
+        await maybeLoadPendingFile(engine)
+        return
+      }
       // Honour a source/scene chosen before the engine started (default is
       // harmonic-pad). Re-read via refs after the await so a scene picked while
       // audio was "Starting…" wins over the value captured at click time.
@@ -795,6 +918,7 @@ export default function App() {
       engine.setPatch(patchRef.current)
       engine.setGateToNotes(gateToNotes)
       engine.setSource(source)
+      await maybeLoadPendingFile(engine)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The audio engine could not start.')
     }
@@ -803,24 +927,16 @@ export default function App() {
   const loadFile = async (file: File | undefined) => {
     if (!file) return
     setError(null)
-    const generation = (fileLoadGenerationRef.current += 1)
+    const engine = engineRef.current
+    if (!engine || engineState !== 'running') {
+      // Before audio starts, retain the file and load it on the Start gesture so
+      // the picker matches drag-and-drop and never opens a context implicitly.
+      pendingFileRef.current = file
+      setError('Press Start audio to load this file.')
+      return
+    }
     try {
-      const engine = engineRef.current
-      if (!engine || engineState !== 'running') {
-        throw new Error('Start audio before loading a file.')
-      }
-      const source = await engine.decodeFile(file)
-      // A newer file selection started while this one was decoding — drop this
-      // (now stale) result so a slow decode can't replace the newer choice.
-      if (generation !== fileLoadGenerationRef.current) return
-      engine.setSource(source)
-      setPeaks(source.peaks)
-      setSourceLabel(source.label)
-      setSampleView({ label: source.label, peaks: source.peaks, sourceId: '' })
-      setSourceMode('sample')
-      setSourceId('')
-      setActiveSceneId('')
-      setFrozen(false)
+      await decodeAndApplyFile(engine, file)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The audio file could not be loaded.')
     }
@@ -844,8 +960,10 @@ export default function App() {
     setLiveInputPending(true)
     setError(null)
     // Enabling live input supersedes any in-flight file decode (shares the file-load
-    // token) so a slow decode can't later stop live input and swap the source.
+    // token) and any pre-start dropped file so neither can later stop live input
+    // and swap the source.
     fileLoadGenerationRef.current += 1
+    pendingFileRef.current = null
     try {
       const engine = engineRef.current
       if (!engine || engineState !== 'running') {
@@ -903,9 +1021,11 @@ export default function App() {
   const onSelectSource = useCallback((id: string) => {
     const engine = engineRef.current
     if (!engine || engineState !== 'running') return
-    // Supersede any in-flight file decode (shares the file-load token) and clear
-    // stale errors so a slow decode can't later replace this pick.
+    // Supersede any in-flight file decode (shares the file-load token) and any
+    // pre-start dropped file, and clear stale errors so neither can later replace
+    // this pick.
     fileLoadGenerationRef.current += 1
+    pendingFileRef.current = null
     setError(null)
     const source = createDemoSource(engine.sampleRate ?? 48_000, id)
     engine.setSource(source)
@@ -917,6 +1037,57 @@ export default function App() {
     setSourceMode('sample')
     setFrozen(false)
   }, [engineState])
+
+  // Drag-and-drop audio loading. Only file drags are claimed (text/link drags fall
+  // through to the browser, and preventDefault stops it navigating to the file).
+  // A nested enter/leave depth keeps the overlay from sticking; the drop reuses the
+  // one central loadFile path, so all size/duration/decode/stale-request/ordering
+  // safeguards apply, and a drop before audio starts is retained as a pending file.
+  const handleDragEnter = (event: DragEvent<HTMLElement>) => {
+    if (!transferHasFiles(event.dataTransfer.types)) return
+    event.preventDefault()
+    dragDepthRef.current = dragEnter(dragDepthRef.current)
+    if (isOverlayVisible(dragDepthRef.current)) setDropActive(true)
+  }
+  const handleDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!transferHasFiles(event.dataTransfer.types)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+  const handleDragLeave = (event: DragEvent<HTMLElement>) => {
+    if (!transferHasFiles(event.dataTransfer.types)) return
+    dragDepthRef.current = dragLeave(dragDepthRef.current)
+    if (!isOverlayVisible(dragDepthRef.current)) setDropActive(false)
+  }
+  const handleDrop = (event: DragEvent<HTMLElement>) => {
+    if (!transferHasFiles(event.dataTransfer.types)) return
+    event.preventDefault()
+    dragDepthRef.current = 0
+    setDropActive(false)
+    const { infos, files } = collectDropFiles(event.dataTransfer)
+    const result = validateDrop(infos)
+    if (!result.ok) {
+      setError(result.error)
+      return
+    }
+    const file = files[result.index]
+    if (!file) {
+      setError('No file found — drop an audio file.')
+      return
+    }
+    void loadFile(file)
+  }
+  const dropHandlers = {
+    onDragEnter: handleDragEnter,
+    onDragOver: handleDragOver,
+    onDragLeave: handleDragLeave,
+    onDrop: handleDrop,
+  }
+  const dropOverlay = dropActive ? (
+    <div className="drop-overlay" aria-hidden="true">
+      <span className="drop-overlay__label">Drop audio to load</span>
+    </div>
+  ) : null
 
   // Session chrome shared by both views: the Continue banner (when a last session
   // exists) and the hidden file input backing "Load session".
@@ -945,8 +1116,9 @@ export default function App() {
 
   if (viewMode === 'live') {
     return (
-      <main className={`app app--${patch.mode} view-${viewMode}`}>
+      <main className={`app app--${patch.mode} view-${viewMode}`} {...dropHandlers}>
         {sessionChrome}
+        {dropOverlay}
         <LiveView
           patch={patch}
           engineState={engineState}
@@ -985,6 +1157,7 @@ export default function App() {
           onSelectSource={onSelectSource}
           onLoadScene={loadScene}
           onWaveformPosition={(position) => updatePatch({ position })}
+          onRegionChange={(regionStart, regionEnd) => updatePatch({ regionStart, regionEnd })}
           onRecordMotion={recordMotion}
           onFinishRecording={finishRecording}
           onPlayMotion={playMotion}
@@ -1000,8 +1173,9 @@ export default function App() {
   }
 
   return (
-    <main className={`app app--${patch.mode} view-${viewMode}`}>
+    <main className={`app app--${patch.mode} view-${viewMode}`} {...dropHandlers}>
       {sessionChrome}
+      {dropOverlay}
       <StudioView
         patch={patch}
         engineState={engineState}
@@ -1053,6 +1227,7 @@ export default function App() {
         onToggleFreeze={toggleFreeze}
         onClearLiveBuffer={clearLiveBuffer}
         onWaveformPosition={(position) => updatePatch({ position })}
+        onRegionChange={(regionStart, regionEnd) => updatePatch({ regionStart, regionEnd })}
         onRecordMotion={recordMotion}
         onFinishRecording={finishRecording}
         onPlayMotion={playMotion}

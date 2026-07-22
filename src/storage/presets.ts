@@ -15,7 +15,10 @@ import { MACROS } from '../audio/macros'
 // simply lacking those fields (see deserializePreset).
 // v3: single `motion` recording → multi-lane `motionLanes` (gesture takes).
 // Legacy v2 `motion` still parses on load and migrates to a single position lane.
-export const PRESET_SCHEMA_VERSION = 3
+// v4: adds optional `sourceId`/`sceneId` for stable factory source/scene relink.
+// Older presets simply lack them (see deserializePreset); `sourceLabel` remains
+// for imported-file/live relink and is never replaced by a factory id.
+export const PRESET_SCHEMA_VERSION = 4
 
 export interface Preset {
   name: string
@@ -26,6 +29,11 @@ export interface Preset {
   motionLanes?: MotionLane[]
   // Optional label of the audio source, used to prompt a relink on load.
   sourceLabel?: string
+  // Stable factory identity for exact restore. sourceId is a DEMO_SOURCES id;
+  // sceneId is a FACTORY_SCENES id. Imported files & live sources never set
+  // these (they carry only sourceLabel) so they can't masquerade as factory.
+  sourceId?: string
+  sceneId?: string
 }
 
 const DEFAULT_PRESET_NAME = 'Untitled'
@@ -37,7 +45,12 @@ export function serializePreset(
   name: string,
   patch: GrainPatch,
   createdAt: number,
-  options?: { motionLanes?: MotionLane[]; sourceLabel?: string },
+  options?: {
+    motionLanes?: MotionLane[]
+    sourceLabel?: string
+    sourceId?: string
+    sceneId?: string
+  },
 ): Preset {
   const preset: Preset = {
     name: coerceName(name),
@@ -56,6 +69,15 @@ export function serializePreset(
 
   const sourceLabel = parseSourceLabel(options?.sourceLabel)
   if (sourceLabel !== undefined) preset.sourceLabel = sourceLabel
+
+  // sourceId/sceneId are opaque ids here (validity against DEMO_SOURCES/
+  // FACTORY_SCENES is the caller's concern via sourceIdentity); coerce
+  // non-strings to undefined exactly like sourceLabel.
+  const sourceId = parseSourceLabel(options?.sourceId)
+  if (sourceId !== undefined) preset.sourceId = sourceId
+
+  const sceneId = parseSourceLabel(options?.sceneId)
+  if (sceneId !== undefined) preset.sceneId = sceneId
 
   return preset
 }
@@ -99,6 +121,14 @@ export function deserializePreset(raw: unknown): Preset {
 
   const sourceLabel = parseSourceLabel(record.sourceLabel)
   if (sourceLabel !== undefined) preset.sourceLabel = sourceLabel
+
+  // v1–v3 presets lack these; missing/non-string values read as undefined so
+  // older payloads deserialize unchanged (the version is stamped to current).
+  const sourceId = parseSourceLabel(record.sourceId)
+  if (sourceId !== undefined) preset.sourceId = sourceId
+
+  const sceneId = parseSourceLabel(record.sceneId)
+  if (sceneId !== undefined) preset.sceneId = sceneId
 
   return preset
 }

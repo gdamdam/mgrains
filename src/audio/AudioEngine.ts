@@ -6,6 +6,12 @@ import type {
   MainToEngineMessage,
 } from './contracts'
 import { createWaveformPeaks, type AudioSourceData } from './demoSource'
+import { supportsOutputRouting } from './devices'
+
+// setSinkId on AudioContext is Chromium-only (Safari/Firefox lack it) and is not
+// yet in the standard lib types. Narrow to the shape we call rather than casting
+// through any.
+type SinkCapableContext = AudioContext & { setSinkId(sinkId: string): Promise<void> }
 
 export type AudioEngineState = 'idle' | 'starting' | 'running' | 'suspended' | 'closed'
 
@@ -43,6 +49,38 @@ export class AudioEngine {
   // the mbus patchbay. null until the engine is running.
   getMasterTap(): AudioNode | null {
     return this.limiter
+  }
+
+  // Whether this browser can route output to a chosen device via
+  // AudioContext.setSinkId (Chromium-only). Safari/Firefox return false → App
+  // shows a "use your system/browser audio settings" message instead of a picker.
+  // Guarded for SSR / environments where AudioContext is undefined.
+  get outputRoutingSupported(): boolean {
+    const proto = typeof AudioContext !== 'undefined' ? AudioContext.prototype : null
+    return supportsOutputRouting(proto)
+  }
+
+  // Route processed output to a specific speaker. deviceId null (or '') selects
+  // the system default. Returns false when unsupported or on failure (e.g. the
+  // chosen device vanished) — in the failure case we fall back to the default
+  // sink so audio is never left routed to a dead device. The graph and master
+  // tap/limiter are untouched; only the context's sink changes.
+  async setOutputDevice(deviceId: string | null): Promise<boolean> {
+    if (!this.context || !this.outputRoutingSupported) return false
+    const context = this.context as SinkCapableContext
+    try {
+      await context.setSinkId(deviceId ?? '')
+      return true
+    } catch {
+      // Chosen device unavailable: revert to the system default so output keeps
+      // flowing, then report failure so the UI can reset its selection.
+      try {
+        await context.setSinkId('')
+      } catch {
+        // Even the default sink refused; nothing more we can safely do.
+      }
+      return false
+    }
   }
 
   // Anchor the shatter sequence's step 0 to a shared Link downbeat `secondsFromNow`
@@ -183,7 +221,12 @@ export class AudioEngine {
     this.send({ type: 'set-freeze', frozen: false })
   }
 
-  async enableLiveInput(): Promise<MediaTrackSettings> {
+  // deviceId (optional) pins a specific input; omitted (or exact-match failure at
+  // the browser level) falls back to the system default input. The stop/teardown
+  // of any prior input below guarantees no leaked stream and no duplicate input
+  // node when switching devices. The echoCancellation/noiseSuppression/
+  // autoGainControl processing stays disabled for a clean granular capture.
+  async enableLiveInput(deviceId?: string): Promise<MediaTrackSettings> {
     if (!this.context || !this.node) {
       throw new Error('Start the audio engine before enabling live input.')
     }
@@ -197,6 +240,7 @@ export class AudioEngine {
     const generation = this.liveInputGeneration
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false,

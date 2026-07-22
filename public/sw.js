@@ -1,12 +1,23 @@
 // Bump these whenever the caching strategy changes; activate() purges older caches.
-const SHELL_CACHE = 'mgrains-shell-v5'
+const SHELL_CACHE = 'mgrains-shell-v6'
 // Runtime cache is size-capped: hashed bundles from past deploys would otherwise
 // accumulate here forever (sw.js never changes between deploys, so the cache name
 // alone can't evict them). Trimming to a fixed budget bounds disk usage.
-const RUNTIME_CACHE = 'mgrains-runtime-v5'
+const RUNTIME_CACHE = 'mgrains-runtime-v6'
 const RUNTIME_MAX_ENTRIES = 64
 const APP_BASE = new URL('./', self.location.href).pathname
-const SHELL_URLS = [APP_BASE, `${APP_BASE}manifest.webmanifest`, `${APP_BASE}mgrains-mark.svg`]
+// Shell = the install-time offline baseline: the app entry, manifest, and every
+// icon the manifest / apple-touch link references, so a first offline launch can
+// install and render its icon without a network round-trip.
+const SHELL_URLS = [
+  APP_BASE,
+  `${APP_BASE}manifest.webmanifest`,
+  `${APP_BASE}mgrains-mark.svg`,
+  `${APP_BASE}icons/icon-192.png`,
+  `${APP_BASE}icons/icon-512.png`,
+  `${APP_BASE}icons/maskable-512.png`,
+  `${APP_BASE}icons/apple-touch-icon-180.png`,
+]
 
 async function precache() {
   const cache = await caches.open(SHELL_CACHE)

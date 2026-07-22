@@ -36,9 +36,9 @@ describe('serializeSession / deserializeSession', () => {
 describe('session motion lanes (schema v2)', () => {
   const lane = { target: 'position', data: { samples: [{ tMs: 0, value: 0.5 }], durationMs: 100 } }
 
-  it('serializes motionLanes and stamps schema v2', () => {
+  it('serializes motionLanes and stamps the current schema version', () => {
     const session = serializeSession(DEFAULT_PATCH, 'studio', 0, { motionLanes: [lane] as never })
-    expect(session.schemaVersion).toBe(2)
+    expect(session.schemaVersion).toBe(SESSION_SCHEMA_VERSION)
     expect(session.motionLanes).toEqual([lane])
   })
 
@@ -65,5 +65,39 @@ describe('session motion lanes (schema v2)', () => {
     expect(deserializeSession(raw).motionLanes).toEqual([
       { target: 'position', data: { samples: [{ tMs: 0, value: 0.3 }], durationMs: 80 } },
     ])
+  })
+})
+
+describe('session factory identity (schema v3)', () => {
+  it('round-trips sourceId and sceneId supplied via options', () => {
+    const session = serializeSession(DEFAULT_PATCH, 'live', 7, {
+      sourceId: 'glass-bells',
+      sceneId: 'bell-spectral-rain',
+    })
+    const restored = deserializeSession(JSON.parse(JSON.stringify(session)))
+
+    expect(session.schemaVersion).toBe(3)
+    expect(restored.sourceId).toBe('glass-bells')
+    expect(restored.sceneId).toBe('bell-spectral-rain')
+  })
+
+  it('omits sourceId/sceneId when not supplied and drops non-string values', () => {
+    const session = serializeSession(DEFAULT_PATCH, 'live', 0)
+    expect(session.sourceId).toBeUndefined()
+    expect(session.sceneId).toBeUndefined()
+
+    const restored = deserializeSession({ patch: DEFAULT_PATCH, sourceId: 99, sceneId: {} })
+    expect(restored.sourceId).toBeUndefined()
+    expect(restored.sceneId).toBeUndefined()
+  })
+
+  it('deserializes an old v2 session without the new fields', () => {
+    const raw = { schemaVersion: 2, patch: DEFAULT_PATCH, viewMode: 'studio', savedAt: 5 }
+    const restored = deserializeSession(raw)
+    // Older payload still loads; new fields are simply absent.
+    expect(restored.schemaVersion).toBe(2)
+    expect(restored.sourceId).toBeUndefined()
+    expect(restored.sceneId).toBeUndefined()
+    expect(restored.viewMode).toBe('studio')
   })
 })

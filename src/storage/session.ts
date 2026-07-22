@@ -7,7 +7,10 @@ import { isRecord, parseMotion, parseMotionLanes, parseSourceLabel } from './pre
 // envelope changes shape; patch-level migration is delegated to sanitizePatch.
 // v2: single `motion` recording → multi-lane `motionLanes` (gesture takes).
 // Legacy v1 `motion` still parses on load and migrates to a single position lane.
-export const SESSION_SCHEMA_VERSION = 2
+// v3: adds optional `sourceId`/`sceneId` for stable factory source/scene relink.
+// Older payloads simply lack them (see deserializeSession); `sourceLabel` remains
+// for imported-file/live relink and is never replaced by a factory id.
+export const SESSION_SCHEMA_VERSION = 3
 
 export type SessionViewMode = 'live' | 'studio'
 
@@ -19,6 +22,11 @@ export interface Session {
   // Optional multi-lane gesture recording captured alongside the patch.
   motionLanes?: MotionLane[]
   sourceLabel?: string
+  // Stable factory identity for exact restore. sourceId is a DEMO_SOURCES id;
+  // sceneId is a FACTORY_SCENES id. Imported files & live sources never set
+  // these (they carry only sourceLabel) so they can't masquerade as factory.
+  sourceId?: string
+  sceneId?: string
 }
 
 // localStorage key for the auto-persisted "last session" restored on startup.
@@ -30,7 +38,12 @@ export function serializeSession(
   patch: GrainPatch,
   viewMode: SessionViewMode,
   savedAt: number,
-  options?: { motionLanes?: MotionLane[]; sourceLabel?: string },
+  options?: {
+    motionLanes?: MotionLane[]
+    sourceLabel?: string
+    sourceId?: string
+    sceneId?: string
+  },
 ): Session {
   const session: Session = {
     schemaVersion: SESSION_SCHEMA_VERSION,
@@ -47,6 +60,15 @@ export function serializeSession(
 
   const sourceLabel = parseSourceLabel(options?.sourceLabel)
   if (sourceLabel !== undefined) session.sourceLabel = sourceLabel
+
+  // sourceId/sceneId are opaque ids here (validity against DEMO_SOURCES/
+  // FACTORY_SCENES is the caller's concern via sourceIdentity); coerce
+  // non-strings to undefined exactly like sourceLabel.
+  const sourceId = parseSourceLabel(options?.sourceId)
+  if (sourceId !== undefined) session.sourceId = sourceId
+
+  const sceneId = parseSourceLabel(options?.sceneId)
+  if (sceneId !== undefined) session.sceneId = sceneId
 
   return session
 }
@@ -82,6 +104,14 @@ export function deserializeSession(raw: unknown): Session {
 
   const sourceLabel = parseSourceLabel(record.sourceLabel)
   if (sourceLabel !== undefined) session.sourceLabel = sourceLabel
+
+  // v1/v2 sessions lack these; missing/non-string values read as undefined so
+  // older payloads deserialize unchanged (the version is stamped to current).
+  const sourceId = parseSourceLabel(record.sourceId)
+  if (sourceId !== undefined) session.sourceId = sourceId
+
+  const sceneId = parseSourceLabel(record.sceneId)
+  if (sceneId !== undefined) session.sceneId = sceneId
 
   return session
 }
