@@ -37,5 +37,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // Several DSP tests render tens of thousands of samples with per-sample
+    // assertions — legitimately compute-heavy. The 5s default has no headroom on
+    // shared 2-core CI runners under parallel load, so raise it for the whole suite.
+    testTimeout: 20000,
   },
 })
