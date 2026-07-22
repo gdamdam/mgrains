@@ -30,8 +30,10 @@ export class GestureCapture {
 
   // Call once per animation frame with the take-relative timestamp and the
   // current value of every watched target. First deviation creates a lane
-  // (until the cap); existing lanes record every call thereafter.
-  sample(tMs: number, values: Record<string, number>): void {
+  // (until the cap); existing lanes record every call thereafter. `suppressed`
+  // names targets that must never spawn a lane — the params a linked macro fans
+  // out to, so the user's gesture is captured as the macro lane alone.
+  sample(tMs: number, values: Record<string, number>, suppressed?: ReadonlySet<string>): void {
     for (const target of Object.keys(values)) {
       const value = values[target]
       if (!Number.isFinite(value)) continue
@@ -41,6 +43,7 @@ export class GestureCapture {
         continue
       }
       if (this.lanes.size >= MAX_MOTION_LANES) continue
+      if (suppressed?.has(target)) continue
       if (target in this.baseline && value !== this.baseline[target]) {
         this.lanes.set(target, [{ tMs, value }])
       }

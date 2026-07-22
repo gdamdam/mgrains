@@ -256,6 +256,23 @@ export class AudioEngine {
       throw new Error('Choose an audio file smaller than 100 MB for this foundation build.')
     }
 
+    // decodeAudioData() offers no pre-decode metadata: a file's duration — and
+    // thus its decoded PCM footprint — is only known once the WHOLE file has
+    // been decoded into memory, so the authoritative ten-minute rule below can
+    // only run post-decode. Without a guard, a highly compressed long file
+    // (e.g. low-bitrate Opus/MP3 within the 100 MB encoded cap) would allocate
+    // gigabytes of PCM before that rule ever runs. As a backstop we reject up
+    // front when the encoded size, expanded by a conservative worst-case ratio,
+    // exceeds a safe decode budget. This is a coarse upper bound — encoded size
+    // does not determine decoded size — so it deliberately errs toward catching
+    // pathological expansion and may reject some large short lossless files; the
+    // ten-minute check remains the precise, authoritative limit.
+    const WORST_CASE_DECODE_RATIO = 50 // decoded PCM bytes per encoded byte at very low bitrates
+    const MAX_DECODED_BYTES = 2 * 1024 * 1024 * 1024
+    if (file.size * WORST_CASE_DECODE_RATIO > MAX_DECODED_BYTES) {
+      throw new Error('This audio file is too large to decode safely. Choose a shorter file (under ten minutes).')
+    }
+
     const encoded = await file.arrayBuffer()
     const decoded = await this.context.decodeAudioData(encoded)
     if (decoded.duration > 10 * 60) {

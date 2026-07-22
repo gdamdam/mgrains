@@ -213,19 +213,20 @@ describe('artifact audit — KNOWN unfixed artifacts (characterized)', () => {
     expect(wrapDelta).toBeGreaterThan(4 * noWrapDelta)
   })
 
-  it('source reset: clearSource() cuts active grains/tails instantly (discontinuity)', () => {
-    // ROOT CAUSE: setSource()/clearSource() call GranularCore.reset(), which zeroes
-    // active grains and all FX state with no fade-through-silence (unlike the mode
-    // switch). Cutting an audible cloud + reverb tail steps the output. FIX
-    // (deferred, structural): defer reset until output reaches silence, or fade
-    // out before swapping the source.
+  it('source reset: clearSource() fades through silence (no discontinuity)', () => {
+    // FIXED (v1.9.x): setSource()/clearSource() no longer call reset() inline while
+    // audible. When a cloud is sounding they defer the reset behind the mode-switch
+    // fade-through-silence — the engine ramps to zero, swaps/clears the source and
+    // resets in silence, then fades back up — so cutting the cloud + reverb tail no
+    // longer steps the output. The swap boundary (frame 24_000) and the whole
+    // fade-out that follows must be free of isolated clicks.
     const core = makeCore(SR, cleanBloom(SR, { space: 1 }), sineSource(SR, 220, SR))
     const { left } = renderTimeline(core, [
       { label: 'render', frames: 24_000 },
       { label: 'clearSource', frames: 6_000, before: (c) => c.clearSource() },
     ])
     const clicks = detectDiscontinuities(left)
-    expect(clicks.some((d) => Math.abs(d.frame - 24_000) <= 4)).toBe(true)
+    expect(clicks.some((d) => d.frame >= 24_000)).toBe(false)
   })
 })
 

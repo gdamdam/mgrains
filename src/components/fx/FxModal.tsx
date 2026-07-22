@@ -16,8 +16,8 @@ interface FxModalProps {
  * Renders nothing while `open` is false. When open it is a
  * role="dialog" aria-modal surface that:
  *   - closes on Escape (keydown on the dialog) and on backdrop click,
- *   - focuses the dialog container on open (focus is not trapped — the lead
- *     can layer trapping later if needed),
+ *   - focuses the dialog container on open and traps Tab / Shift+Tab within it
+ *     so keyboard users cannot reach the (still-visible) background,
  *   - has a header (title + close button), an optional `viz` slot for the SVG
  *     visualization, and a body (`children` = the param sliders).
  *
@@ -51,6 +51,34 @@ export function FxModal({ title, open, onClose, children, viz }: FxModalProps) {
     if (event.key === 'Escape') {
       event.stopPropagation()
       onClose()
+      return
+    }
+    if (event.key !== 'Tab') return
+    // Trap focus: aria-modal alone does not stop Tab from leaving the dialog
+    // into the still-rendered background (no `inert` pattern exists here), so
+    // we cycle focus between the first and last focusable descendants.
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const focusable = dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )
+    if (focusable.length === 0) {
+      event.preventDefault()
+      dialog.focus()
+      return
+    }
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    const active = document.activeElement
+    if (event.shiftKey) {
+      // Wrap backward from the first element (or the dialog itself) to the last.
+      if (active === first || active === dialog) {
+        event.preventDefault()
+        last.focus()
+      }
+    } else if (active === last) {
+      event.preventDefault()
+      first.focus()
     }
   }
 

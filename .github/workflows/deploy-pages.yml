@@ -43,8 +43,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      - name: Lint, test, and build (npm run check)
+        # `check` runs lint + tests + the production build, so a failing gate
+        # blocks the deploy instead of shipping a broken site. It emits the same
+        # dist/ the upload step needs, so no separate build step is required.
+        run: npm run check
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

@@ -99,6 +99,14 @@ export class GranularCore {
   // process(): a supplied anchor never replays the steps it skipped past.
   private shatterAnchorFrame: number | null = null
   private pendingPatch: GrainPatch | null = null
+  // Deferred source/scene swap: setSource()/clearSource() fade the engine through
+  // silence (reusing the mode-switch transition) before resetting, so cutting an
+  // audible grain cloud and its FX tail can't step the output. The new buffers are
+  // held here until the fade-out reaches zero (see advanceModeTransition), then
+  // swapped in and faded back up.
+  private pendingSourceReset = false
+  private pendingSourceLeft: Float32Array<ArrayBufferLike> = new Float32Array(0)
+  private pendingSourceRight: Float32Array<ArrayBufferLike> = new Float32Array(0)
   private modeTransitionState: ModeTransitionState = 'steady'
   private modeTransitionGain = 1
   private readonly modeTransitionStep: number
@@ -197,6 +205,11 @@ export class GranularCore {
   private readonly gainLeft: Float32Array
   private readonly gainRight: Float32Array
   private readonly windowCode: Uint8Array
+  // Window shape is captured per grain alongside windowCode (grain-local
+  // ownership): once a grain is sounding, moving windowSkew/windowHardness must
+  // not reshape it, so the render path reads these snapshots, not the live patch.
+  private readonly windowSkew: Float32Array
+  private readonly windowHardness: Float32Array
   private readonly regionStartFrame: Float64Array
   private readonly regionLengthFrames: Float64Array
 
@@ -272,6 +285,8 @@ export class GranularCore {
     this.gainLeft = new Float32Array(this.maxGrains)
     this.gainRight = new Float32Array(this.maxGrains)
     this.windowCode = new Uint8Array(this.maxGrains)
+    this.windowSkew = new Float32Array(this.maxGrains)
+    this.windowHardness = new Float32Array(this.maxGrains)
     this.regionStartFrame = new Float64Array(this.maxGrains)
     this.regionLengthFrames = new Float64Array(this.maxGrains)
     this.filterOn = new Uint8Array(this.maxGrains)
@@ -381,8 +396,8 @@ export class GranularCore {
       intensities[count] = grainWindow(
         decodeWindow(this.windowCode[grain]),
         phase,
-        this.patch.windowSkew,
-        this.patch.windowHardness,
+        this.windowSkew[grain],
+        this.windowHardness[grain],
       )
       count += 1
     }
@@ -430,11 +445,17 @@ export class GranularCore {
       return
     }
 
-    this.sourceLeft = left
-    this.sourceRight = right
-    this.sourceLength = length
-    this.sourceFrameOffset = 0
-    this.reset()
+    // Nothing sounding yet — swap immediately, there is no tail to click.
+    if (this.sourceLength < 2) {
+      this.sourceLeft = left
+      this.sourceRight = right
+      this.sourceLength = length
+      this.sourceFrameOffset = 0
+      this.reset()
+      return
+    }
+
+    this.scheduleSourceReset(left, right)
   }
 
   setSourceView(
@@ -453,11 +474,42 @@ export class GranularCore {
   }
 
   clearSource(): void {
+    // If audible, fade through silence before clearing so the reset can't click.
+    if (this.sourceLength >= 2) {
+      this.scheduleSourceReset(new Float32Array(0), new Float32Array(0))
+      return
+    }
     this.sourceLeft = new Float32Array(0)
     this.sourceRight = new Float32Array(0)
     this.sourceLength = 0
     this.sourceFrameOffset = 0
     this.reset()
+  }
+
+  // Defer a source swap until the engine has faded to silence. Holds the new
+  // buffers and arms the mode-switch transition's fade-out; advanceModeTransition
+  // performs the swap + reset at the zero-crossing, then fades back in.
+  private scheduleSourceReset(
+    left: Float32Array<ArrayBufferLike>,
+    right: Float32Array<ArrayBufferLike>,
+  ): void {
+    this.pendingSourceLeft = left
+    this.pendingSourceRight = right
+    this.pendingSourceReset = true
+    this.modeTransitionState = 'fade-out'
+  }
+
+  private applyPendingSourceSwap(): void {
+    const left = this.pendingSourceLeft
+    const right = this.pendingSourceRight
+    const length = Math.min(left.length, right.length)
+    this.sourceLeft = left
+    this.sourceRight = right
+    this.sourceLength = length >= 2 ? length : 0
+    this.sourceFrameOffset = 0
+    this.pendingSourceLeft = new Float32Array(0)
+    this.pendingSourceRight = new Float32Array(0)
+    this.pendingSourceReset = false
   }
 
   // Silence and reset every grain, steal-fade tail and their filter state.
@@ -677,8 +729,8 @@ export class GranularCore {
         const envelope = grainWindow(
           decodeWindow(this.windowCode[grain]),
           phase,
-          this.patch.windowSkew,
-          this.patch.windowHardness,
+          this.windowSkew[grain],
+          this.windowHardness[grain],
         )
         const sourceFrame = this.wrapFrameInRegion(
           this.sourcePosition[grain],
@@ -1069,6 +1121,8 @@ export class GranularCore {
     this.gainLeft[slot] = normalizedGain * panGainLeft(pan)
     this.gainRight[slot] = normalizedGain * panGainRight(pan)
     this.windowCode[slot] = encodeWindow(this.patch.window)
+    this.windowSkew[slot] = this.patch.windowSkew
+    this.windowHardness[slot] = this.patch.windowHardness
     this.regionStartFrame[slot] = regionStart
     this.regionLengthFrames[slot] = regionLength
   }
@@ -1081,8 +1135,8 @@ export class GranularCore {
     const envelope = grainWindow(
       decodeWindow(this.windowCode[slot]),
       phase,
-      this.patch.windowSkew,
-      this.patch.windowHardness,
+      this.windowSkew[slot],
+      this.windowHardness[slot],
     )
     if (envelope <= 0) return
 
@@ -1198,12 +1252,23 @@ export class GranularCore {
       this.modeTransitionGain = Math.max(0, this.modeTransitionGain - this.modeTransitionStep)
       if (this.modeTransitionGain <= this.modeTransitionStep * 0.5) {
         this.modeTransitionGain = 0
-        if (this.pendingPatch) {
-          this.clearGrainPool()
-          this.applyPatch(this.pendingPatch, true, absoluteFrame)
-          this.pendingPatch = null
+        if (this.pendingSourceReset) {
+          // Silence reached: swap the source and run the full reset now that
+          // zeroing grains and FX tails can no longer step the output.
+          this.applyPendingSourceSwap()
+          this.reset()
+          // reset() snaps the transition back to steady; re-arm the fade-in so we
+          // ramp up from silence into the new source instead of jumping to full.
+          this.modeTransitionGain = 0
+          this.modeTransitionState = 'fade-in'
+        } else {
+          if (this.pendingPatch) {
+            this.clearGrainPool()
+            this.applyPatch(this.pendingPatch, true, absoluteFrame)
+            this.pendingPatch = null
+          }
+          this.modeTransitionState = 'fade-in'
         }
-        this.modeTransitionState = 'fade-in'
       }
     } else if (this.modeTransitionState === 'fade-in') {
       this.modeTransitionGain = Math.min(1, this.modeTransitionGain + this.modeTransitionStep)

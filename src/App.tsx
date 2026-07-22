@@ -91,6 +91,10 @@ export default function App() {
   // discarded instead of clobbering the current selection (file decode / preset).
   const fileLoadGenerationRef = useRef(0)
   const presetLoadGenerationRef = useRef(0)
+  // Latest patch/source for async startup: startAudio awaits worklet boot, and a
+  // scene chosen meanwhile updates these so completion honours the newer choice.
+  const patchRef = useRef(patch)
+  const sourceIdRef = useRef(sourceId)
   const [activeGrains, setActiveGrains] = useState(0)
   const [peak, setPeak] = useState(0)
   const [currentShatterStep, setCurrentShatterStep] = useState(0)
@@ -108,6 +112,9 @@ export default function App() {
   const motionLanesRef = useRef<MotionLanePlayback[]>([])
   const captureRef = useRef<GestureCapture | null>(null)
   const captureLastTMsRef = useRef(0)
+  // Params a linked macro fanned out to during the current take; the recorder
+  // skips them so only the gestured macro becomes a lane, not its downstream fan-out.
+  const macroDrivenParamsRef = useRef<Set<string>>(new Set())
   const motionValuesRef = useRef<Record<string, number>>({})
   const setMacroRef = useRef<(id: string, value: number) => void>(() => {})
   const [motionLaneCount, setMotionLaneCount] = useState(0)
@@ -253,6 +260,13 @@ export default function App() {
     pitchBendRangeRef.current = patch.pitchBendRange
   }, [patch.pitchBendRange])
 
+  // Keep the latest patch/source available to the async startAudio without
+  // capturing stale values across its worklet-startup await.
+  useEffect(() => {
+    patchRef.current = patch
+    sourceIdRef.current = sourceId
+  }, [patch, sourceId])
+
   // Push the note-gate toggle to the engine when it changes (a fresh start also
   // seeds it in startAudio, for the case it was toggled before audio began).
   useEffect(() => {
@@ -325,8 +339,10 @@ export default function App() {
         // Normalized -1..1 → semitones scaled by the patch's bend range.
         engineRef.current?.setPitchBend(event.value * pitchBendRangeRef.current)
       } else if (event.type === 'disconnect') {
-        // Unplugged device: release every voice it still holds so notes don't stick.
+        // Unplugged device: release every voice it still holds so notes don't stick,
+        // and recentre pitch bend so a wheel lost mid-bend can't leave notes transposed.
         if (alloc.releaseOwnerPrefix(`midi:${event.device}:`)) pushNotes()
+        engineRef.current?.setPitchBend(0)
       }
     })
     void midi.enable().catch(() => { /* Web MIDI unavailable or permission denied */ })
@@ -334,6 +350,8 @@ export default function App() {
       midi.disable()
       // Release only MIDI-held voices — QWERTY voices belong to their own effect.
       if (alloc.releaseOwnerPrefix('midi:')) pushNotes()
+      // Recentre pitch bend so teardown can't leave a residual transposition.
+      engineRef.current?.setPitchBend(0)
     }
   }, [engineState])
 
@@ -466,7 +484,11 @@ export default function App() {
   const setMacro = useCallback((id: string, value: number) => {
     setMacroValues((previous) => ({ ...previous, [id]: value }))
     if (linkedMacros[id] !== false) {
-      updatePatch(applyMacro(patch, id, value))
+      const changes = applyMacro(patch, id, value)
+      // Tag the params this macro drives so the recorder attributes the gesture to
+      // the macro lane alone, not the several patch params it fans out to.
+      for (const key of Object.keys(changes)) macroDrivenParamsRef.current.add(key)
+      updatePatch(changes)
     }
   }, [linkedMacros, patch, updatePatch])
 
@@ -518,6 +540,9 @@ export default function App() {
         applyPresetMotion(preset.motionLanes)
         if (preset.sourceLabel && preset.sourceLabel !== sourceLabel) {
           setError(`Preset "${name}" was saved with source "${preset.sourceLabel}". Load that source to match its motion and position.`)
+        } else {
+          // Matching (or source-less) preset loaded cleanly: drop any stale error.
+          setError(null)
         }
       })
       .catch(() => setError('Could not load preset.'))
@@ -530,6 +555,10 @@ export default function App() {
   const loadScene = (id: string) => {
     const scene = findScene(id)
     if (!scene) return
+    // Picking a scene supersedes any in-flight file decode (shares the file-load
+    // token) so a slow decode can't later clobber this source, and clears stale errors.
+    fileLoadGenerationRef.current += 1
+    setError(null)
     applyPatch(sanitizePatch({ ...DEFAULT_PATCH, ...scene.patch }))
     // Scenes carry no motion, so this stops/clears any existing lanes.
     applyPresetMotion()
@@ -562,6 +591,9 @@ export default function App() {
     writeViewMode(session.viewMode)
     if (session.sourceLabel && session.sourceLabel !== sourceLabel) {
       setError(`Session was saved with source "${session.sourceLabel}". Load that source to match its motion and position.`)
+    } else {
+      // Matching (or source-less) session restored cleanly: drop any stale error.
+      setError(null)
     }
   }
 
@@ -626,6 +658,16 @@ export default function App() {
     if (!busEnabled) mbusClientRef.current?.disconnect()
   }, [busEnabled, engineState])
 
+  // Tear down any live publication/socket on unmount or hot reload so an enabled
+  // bus can't outlive the component. Kept unmount-only (empty deps) so it never
+  // churns the publication on the reconciliation effect's ordinary re-runs.
+  useEffect(() => () => {
+    mbusPubRef.current?.stop()
+    mbusPubRef.current = null
+    mbusTapRef.current = null
+    mbusClientRef.current?.disconnect()
+  }, [])
+
   const cancelMotionLoop = () => {
     if (motionRafRef.current !== null) {
       cancelAnimationFrame(motionRafRef.current)
@@ -638,12 +680,14 @@ export default function App() {
     captureRef.current = new GestureCapture(motionValuesRef.current)
     captureLastTMsRef.current = 0
     motionT0Ref.current = -1
+    // Fresh take: forget fan-out tags accrued by earlier macro moves.
+    macroDrivenParamsRef.current = new Set()
     setMotionState('recording')
     const frame = (now: number) => {
       if (motionT0Ref.current < 0) motionT0Ref.current = now
       const tMs = now - motionT0Ref.current
       captureLastTMsRef.current = tMs
-      captureRef.current?.sample(tMs, motionValuesRef.current)
+      captureRef.current?.sample(tMs, motionValuesRef.current, macroDrivenParamsRef.current)
       motionRafRef.current = requestAnimationFrame(frame)
     }
     motionRafRef.current = requestAnimationFrame(frame)
@@ -735,9 +779,12 @@ export default function App() {
       // reload (already running) generates and loads the demo source.
       if (status === 'resumed') return
       // Honour a source/scene chosen before the engine started (default is
-      // harmonic-pad). createDemoSource falls back to the first entry for an
-      // unknown id, so resolve the id we actually loaded to keep state honest.
-      const desiredId = DEMO_SOURCES.some((entry) => entry.id === sourceId) ? sourceId : 'harmonic-pad'
+      // harmonic-pad). Re-read via refs after the await so a scene picked while
+      // audio was "Starting…" wins over the value captured at click time.
+      // createDemoSource falls back to the first entry for an unknown id, so
+      // resolve the id we actually loaded to keep state honest.
+      const latestSourceId = sourceIdRef.current
+      const desiredId = DEMO_SOURCES.some((entry) => entry.id === latestSourceId) ? latestSourceId : 'harmonic-pad'
       const source = createDemoSource(engine.sampleRate ?? 48_000, desiredId)
       setSourceId(desiredId)
       setPeaks(source.peaks)
@@ -745,7 +792,7 @@ export default function App() {
       setSampleView({ label: source.label, peaks: source.peaks, sourceId: desiredId })
       setSourceMode('sample')
       setFrozen(false)
-      engine.setPatch(patch)
+      engine.setPatch(patchRef.current)
       engine.setGateToNotes(gateToNotes)
       engine.setSource(source)
     } catch (caught) {
@@ -780,6 +827,8 @@ export default function App() {
   }
 
   const returnToSample = () => {
+    // Switching back off live input clears the "device disconnected" notice.
+    setError(null)
     engineRef.current?.useSampleSource()
     setSourceMode('sample')
     setSourceId(sampleView.sourceId)
@@ -794,6 +843,9 @@ export default function App() {
     liveInputPendingRef.current = true
     setLiveInputPending(true)
     setError(null)
+    // Enabling live input supersedes any in-flight file decode (shares the file-load
+    // token) so a slow decode can't later stop live input and swap the source.
+    fileLoadGenerationRef.current += 1
     try {
       const engine = engineRef.current
       if (!engine || engineState !== 'running') {
@@ -851,6 +903,10 @@ export default function App() {
   const onSelectSource = useCallback((id: string) => {
     const engine = engineRef.current
     if (!engine || engineState !== 'running') return
+    // Supersede any in-flight file decode (shares the file-load token) and clear
+    // stale errors so a slow decode can't later replace this pick.
+    fileLoadGenerationRef.current += 1
+    setError(null)
     const source = createDemoSource(engine.sampleRate ?? 48_000, id)
     engine.setSource(source)
     setSourceId(id)
