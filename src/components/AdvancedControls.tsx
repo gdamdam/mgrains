@@ -38,166 +38,184 @@ export function AdvancedControls({ patch, onChange, onReset }: AdvancedControlsP
         <span>precise · less frequent</span>
       </summary>
       <div className="advanced-body">
-        <div className="parameter-grid">
-          <ParameterControl
-            label="Region start"
-            value={patch.regionStart * 100}
-            minimum={0}
-            maximum={100}
-            unit="%"
-            decimals={0}
-            onChange={(value) => onChange({ regionStart: value / 100 })}
-          />
-          <ParameterControl
-            label="Region end"
-            value={patch.regionEnd * 100}
-            minimum={0}
-            maximum={100}
-            unit="%"
-            decimals={0}
-            onChange={(value) => onChange({ regionEnd: value / 100 })}
-          />
-          <ParameterControl
-            label="Timing jitter"
-            value={patch.timingJitter * 100}
-            minimum={0}
-            maximum={100}
-            unit="%"
-            decimals={0}
-            onChange={(value) => onChange({ timingJitter: value / 100 })}
-          />
-          <ParameterControl
-            label="Scan speed"
-            value={patch.scanSpeed}
-            minimum={PATCH_RANGES.scanSpeed[0]}
-            maximum={PATCH_RANGES.scanSpeed[1]}
-            step={0.01}
-            unit="x"
-            decimals={2}
-            onChange={(scanSpeed) => onChange({ scanSpeed })}
-          />
-          <ParameterControl
-            label="Pitch"
-            value={patch.pitchSemitones}
-            minimum={PATCH_RANGES.pitchSemitones[0]}
-            maximum={PATCH_RANGES.pitchSemitones[1]}
-            step={1}
-            unit="st"
-            decimals={0}
-            onChange={(pitchSemitones) => onChange({ pitchSemitones })}
-          />
-          <ParameterControl
-            label="Pitch spread"
-            value={patch.pitchSpreadSemitones}
-            minimum={PATCH_RANGES.pitchSpreadSemitones[0]}
-            maximum={PATCH_RANGES.pitchSpreadSemitones[1]}
-            step={0.1}
-            unit="st"
-            decimals={1}
-            onChange={(pitchSpreadSemitones) => onChange({ pitchSpreadSemitones })}
-          />
-          <Select
-            label="Scatter scale"
-            value={patch.pitchQuantize}
-            options={PITCH_SCALE_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
-            onChange={(pitchQuantize) => onChange({ pitchQuantize })}
-          />
-          <ParameterControl
-            label="Bend range"
-            value={patch.pitchBendRange}
-            minimum={PATCH_RANGES.pitchBendRange[0]}
-            maximum={PATCH_RANGES.pitchBendRange[1]}
-            step={1}
-            unit="st"
-            decimals={0}
-            onChange={(pitchBendRange) => onChange({ pitchBendRange })}
-          />
-          <ParameterControl
-            label="Glide"
-            value={patch.glideTime * 1000}
-            minimum={PATCH_RANGES.glideTime[0] * 1000}
-            maximum={PATCH_RANGES.glideTime[1] * 1000}
-            step={10}
-            unit="ms"
-            decimals={0}
-            onChange={(value) => onChange({ glideTime: value / 1000 })}
-          />
-          <ParameterControl
-            label="Reverse prob"
-            value={patch.reverseProbability * 100}
-            minimum={0}
-            maximum={100}
-            unit="%"
-            decimals={0}
-            onChange={(value) => onChange({ reverseProbability: value / 100 })}
-          />
-          <ParameterControl
-            label="Stereo spread"
-            value={patch.stereoSpread * 100}
-            minimum={0}
-            maximum={100}
-            unit="%"
-            decimals={0}
-            onChange={(value) => onChange({ stereoSpread: value / 100 })}
-          />
-          <ParameterControl
-            label="Output"
-            value={patch.outputGain * 100}
-            minimum={0}
-            maximum={100}
-            unit="%"
-            decimals={0}
-            onChange={(value) => onChange({ outputGain: value / 100 })}
-          />
-          <Select
-            label="Grain window"
-            value={patch.window}
-            options={WINDOW_OPTIONS.map((w) => ({ value: w.value, label: w.label }))}
-            onChange={(window) => onChange({ window })}
-          />
-          <ParameterControl
-            label="Window skew"
-            value={patch.windowSkew * 100}
-            minimum={PATCH_RANGES.windowSkew[0] * 100}
-            maximum={PATCH_RANGES.windowSkew[1] * 100}
-            step={1}
-            unit="%"
-            decimals={0}
-            onChange={(value) => onChange({ windowSkew: value / 100 })}
-          />
-          <ParameterControl
-            label="Window hardness"
-            value={patch.windowHardness * 100}
-            minimum={PATCH_RANGES.windowHardness[0] * 100}
-            maximum={PATCH_RANGES.windowHardness[1] * 100}
-            step={1}
-            unit="%"
-            decimals={0}
-            onChange={(value) => onChange({ windowHardness: value / 100 })}
-          />
-          <ParameterControl
-            label="Grain filter"
-            value={patch.grainFilterHz}
-            minimum={PATCH_RANGES.grainFilterHz[0]}
-            maximum={PATCH_RANGES.grainFilterHz[1]}
-            step={1}
-            unit="Hz"
-            scale="log"
-            decimals={0}
-            maxLabel="Off"
-            onChange={(grainFilterHz) => onChange({ grainFilterHz })}
-          />
-          <ParameterControl
-            label="Filter spread"
-            value={patch.grainFilterSpread}
-            minimum={PATCH_RANGES.grainFilterSpread[0]}
-            maximum={PATCH_RANGES.grainFilterSpread[1]}
-            step={0.1}
-            unit="oct"
-            decimals={1}
-            onChange={(grainFilterSpread) => onChange({ grainFilterSpread })}
-          />
-        </div>
+        <section className="advanced-section">
+          <div className="panel-heading"><span>Region &amp; scan</span></div>
+          <div className="parameter-grid">
+            <ParameterControl
+              label="Region start"
+              value={patch.regionStart * 100}
+              minimum={0}
+              maximum={100}
+              unit="%"
+              decimals={0}
+              onChange={(value) => onChange({ regionStart: value / 100 })}
+            />
+            <ParameterControl
+              label="Region end"
+              value={patch.regionEnd * 100}
+              minimum={0}
+              maximum={100}
+              unit="%"
+              decimals={0}
+              onChange={(value) => onChange({ regionEnd: value / 100 })}
+            />
+            <ParameterControl
+              label="Scan speed"
+              value={patch.scanSpeed}
+              minimum={PATCH_RANGES.scanSpeed[0]}
+              maximum={PATCH_RANGES.scanSpeed[1]}
+              step={0.01}
+              unit="x"
+              decimals={2}
+              onChange={(scanSpeed) => onChange({ scanSpeed })}
+            />
+            <ParameterControl
+              label="Timing jitter"
+              value={patch.timingJitter * 100}
+              minimum={0}
+              maximum={100}
+              unit="%"
+              decimals={0}
+              onChange={(value) => onChange({ timingJitter: value / 100 })}
+            />
+            <ParameterControl
+              label="Reverse prob"
+              value={patch.reverseProbability * 100}
+              minimum={0}
+              maximum={100}
+              unit="%"
+              decimals={0}
+              onChange={(value) => onChange({ reverseProbability: value / 100 })}
+            />
+          </div>
+        </section>
+        <section className="advanced-section">
+          <div className="panel-heading"><span>Pitch</span></div>
+          <div className="parameter-grid">
+            <Select
+              label="Scatter scale"
+              value={patch.pitchQuantize}
+              options={PITCH_SCALE_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+              onChange={(pitchQuantize) => onChange({ pitchQuantize })}
+            />
+            <ParameterControl
+              label="Pitch"
+              value={patch.pitchSemitones}
+              minimum={PATCH_RANGES.pitchSemitones[0]}
+              maximum={PATCH_RANGES.pitchSemitones[1]}
+              step={1}
+              unit="st"
+              decimals={0}
+              onChange={(pitchSemitones) => onChange({ pitchSemitones })}
+            />
+            <ParameterControl
+              label="Pitch spread"
+              value={patch.pitchSpreadSemitones}
+              minimum={PATCH_RANGES.pitchSpreadSemitones[0]}
+              maximum={PATCH_RANGES.pitchSpreadSemitones[1]}
+              step={0.1}
+              unit="st"
+              decimals={1}
+              onChange={(pitchSpreadSemitones) => onChange({ pitchSpreadSemitones })}
+            />
+            <ParameterControl
+              label="Bend range"
+              value={patch.pitchBendRange}
+              minimum={PATCH_RANGES.pitchBendRange[0]}
+              maximum={PATCH_RANGES.pitchBendRange[1]}
+              step={1}
+              unit="st"
+              decimals={0}
+              onChange={(pitchBendRange) => onChange({ pitchBendRange })}
+            />
+            <ParameterControl
+              label="Glide"
+              value={patch.glideTime * 1000}
+              minimum={PATCH_RANGES.glideTime[0] * 1000}
+              maximum={PATCH_RANGES.glideTime[1] * 1000}
+              step={10}
+              unit="ms"
+              decimals={0}
+              onChange={(value) => onChange({ glideTime: value / 1000 })}
+            />
+          </div>
+        </section>
+        <section className="advanced-section">
+          <div className="panel-heading"><span>Grain window</span></div>
+          <div className="parameter-grid">
+            <Select
+              label="Grain window"
+              value={patch.window}
+              options={WINDOW_OPTIONS.map((w) => ({ value: w.value, label: w.label }))}
+              onChange={(window) => onChange({ window })}
+            />
+            <ParameterControl
+              label="Window skew"
+              value={patch.windowSkew * 100}
+              minimum={PATCH_RANGES.windowSkew[0] * 100}
+              maximum={PATCH_RANGES.windowSkew[1] * 100}
+              step={1}
+              unit="%"
+              decimals={0}
+              onChange={(value) => onChange({ windowSkew: value / 100 })}
+            />
+            <ParameterControl
+              label="Window hardness"
+              value={patch.windowHardness * 100}
+              minimum={PATCH_RANGES.windowHardness[0] * 100}
+              maximum={PATCH_RANGES.windowHardness[1] * 100}
+              step={1}
+              unit="%"
+              decimals={0}
+              onChange={(value) => onChange({ windowHardness: value / 100 })}
+            />
+          </div>
+        </section>
+        <section className="advanced-section">
+          <div className="panel-heading"><span>Filter &amp; output</span></div>
+          <div className="parameter-grid">
+            <ParameterControl
+              label="Grain filter"
+              value={patch.grainFilterHz}
+              minimum={PATCH_RANGES.grainFilterHz[0]}
+              maximum={PATCH_RANGES.grainFilterHz[1]}
+              step={1}
+              unit="Hz"
+              scale="log"
+              decimals={0}
+              maxLabel="Off"
+              onChange={(grainFilterHz) => onChange({ grainFilterHz })}
+            />
+            <ParameterControl
+              label="Filter spread"
+              value={patch.grainFilterSpread}
+              minimum={PATCH_RANGES.grainFilterSpread[0]}
+              maximum={PATCH_RANGES.grainFilterSpread[1]}
+              step={0.1}
+              unit="oct"
+              decimals={1}
+              onChange={(grainFilterSpread) => onChange({ grainFilterSpread })}
+            />
+            <ParameterControl
+              label="Stereo spread"
+              value={patch.stereoSpread * 100}
+              minimum={0}
+              maximum={100}
+              unit="%"
+              decimals={0}
+              onChange={(value) => onChange({ stereoSpread: value / 100 })}
+            />
+            <ParameterControl
+              label="Output"
+              value={patch.outputGain * 100}
+              minimum={0}
+              maximum={100}
+              unit="%"
+              decimals={0}
+              onChange={(value) => onChange({ outputGain: value / 100 })}
+            />
+          </div>
+        </section>
         <LfoControls patch={patch} onChange={onChange} />
         <button type="button" className="advanced-reset" onClick={onReset}>
           Reset advanced

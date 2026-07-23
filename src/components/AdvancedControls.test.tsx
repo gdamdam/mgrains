@@ -5,6 +5,19 @@ import { DEFAULT_PATCH } from '../audio/contracts'
 
 const noop = () => {}
 
+describe('AdvancedControls grouping', () => {
+  it('organizes parameters into labelled sections', () => {
+    const html = renderToStaticMarkup(
+      <AdvancedControls patch={DEFAULT_PATCH} onChange={noop} onReset={noop} />,
+    )
+    expect(html).toContain('Region &amp; scan')
+    expect(html).toContain('Grain window')
+    expect(html).toContain('Filter &amp; output')
+    // Four grouped sections precede the Modulation block.
+    expect((html.match(/advanced-section/g) ?? []).length).toBeGreaterThanOrEqual(4)
+  })
+})
+
 describe('AdvancedControls per-grain filter', () => {
   it('renders the Grain filter dial as "Off" at the default (dial max)', () => {
     const html = renderToStaticMarkup(

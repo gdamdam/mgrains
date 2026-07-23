@@ -828,21 +828,41 @@ footer {
 
 .advanced-body {
   display: grid;
-  gap: 12px;
+  gap: 22px;
   padding: 0 16px 16px;
+}
+
+/* Each advanced group: an eyebrow heading over its own even card grid. */
+.advanced-section {
+  display: grid;
+  gap: 10px;
+}
+
+.advanced-section .panel-heading {
+  padding-bottom: 0;
 }
 
 .advanced-panel .parameter-grid {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
-.advanced-panel .select-control {
-  align-content: start;
+/* Dropdowns share the slider card's chrome so every row in a group lines up:
+   label at the top-left, the control anchored to the bottom of the card. */
+.advanced-panel .parameter-grid .select {
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.advanced-panel .select-control select {
-  grid-column: 1 / -1;
-  width: 100%;
+.advanced-panel .parameter-grid .select-label {
+  font: 650 0.8rem/1.1 var(--font-mono);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
 }
 
 .advanced-reset {
