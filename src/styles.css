@@ -1203,6 +1203,9 @@ footer {
 .view-live .app-header, .view-live .intro-row, .view-live .patch-actions,
 .view-live .motion-strip { display: none; } /* Live owns its own chrome */
 .live-topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.live-brand { display: flex; align-items: baseline; gap: 8px; margin-right: 4px; }
+.live-brand .wordmark { color: var(--text); }
+.live-version { color: var(--muted); font: 700 0.62rem/1 var(--font-mono); letter-spacing: 0.08em; }
 .live-source { color: var(--muted); font: 500 0.72rem/1 var(--font-mono); }
 .live-hint { color: var(--muted); font: 500 0.68rem/1 var(--font-mono); margin-top: 8px; }
 .live-start { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 16px; padding: 18px; border: 1px solid var(--accent); border-radius: var(--radius); background: rgb(166 226 103 / 0.08); }

@@ -3,6 +3,7 @@ import { HeaderSlider } from '../HeaderSlider'
 import { MacroControls } from '../MacroControls'
 import { Select } from '../select/Select'
 import { Waveform } from '../Waveform'
+import { Wordmark } from '../Wordmark'
 import { XYPad } from '../XYPad'
 import { Dial } from '../dial/Dial'
 import { DEMO_SOURCES } from '../../audio/demoSource'
@@ -72,6 +73,10 @@ export function LiveView(props: LiveViewProps) {
   return (
     <div className="view">
       <div className="live-topbar">
+        <span className="live-brand">
+          <Wordmark height={22} />
+          <span className="live-version">v{__APP_VERSION__}</span>
+        </span>
         <span className={`status-dot status-dot--${props.engineState}`} />
         <span className="live-status">{props.engineState}</span>
         <span className="meter" aria-label={`Output peak ${Math.round(props.peak * 100)} percent`}>

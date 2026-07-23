@@ -31,6 +31,13 @@ describe('LiveView', () => {
     expect(html).toContain('Load scene…')          // the Scene picker (no scene active)
   })
 
+  it('shows the mgrains logo and version in the top-left', () => {
+    const html = renderToStaticMarkup(<LiveView {...baseProps} />)
+    expect(html).toContain('live-brand')          // top-left brand block
+    expect(html).toContain('aria-label="mgrains"') // dot-matrix wordmark
+    expect(html).toMatch(/v\d+\.\d+\.\d+/)          // version string
+  })
+
   it('offers an immediate audio start action when the engine is idle', () => {
     const html = renderToStaticMarkup(<LiveView {...baseProps} engineState="idle" />)
     expect(html).toContain('Tap to start audio')
